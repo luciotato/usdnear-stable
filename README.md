@@ -60,46 +60,45 @@ Alice account now reads:
 If Alice chooses to borrow USDNEAR 100, USDNEAR 100 are minted into Alice's account, and USD 200 value of collateral is locked and trasnferred to the collateral pool. The global amount of minted USDNEAR will be increased by 100 and the value of the collateral pool will be incresed by stNEAR valued USD 200, keeping the global overcollateralization constant.
 
 Alice account now reads:
-- Tokens
--- USDNEAR: 100
--- stNEAR: 20 Available (USD 50) + 80 Locked (USD 200)
-- Line of Credit
--- Limit: USDNEAR 50
-- Outstanding Loans:
--- owed: USDNEAR 100   [Repay]
--- Locked stNEAR (Collateral): 80 (USD 200) [Add Collateral]
--- Collateralization Ratio: 200%
+- Tokens  
+-- USDNEAR: 100  
+-- stNEAR: 20 Available (USD 50) + 80 Locked (USD 200)  
+- Line of Credit  
+-- Limit: USDNEAR 50  
+- Outstanding Loans:  
+-- owed: USDNEAR 100   [Repay]  
+-- Locked stNEAR (Collateral): 80 (USD 200) [Add Collateral]  
+-- Collateralization Ratio: 200%  
 
 Let's assume Alice trasnfers USDNEAR 100 to Bob
 
 Bob account now reads:
-- Tokens
--- USDNEAR: 100
+- Tokens  
+-- USDNEAR: 100  
 
 and Alice account reads:
-- Tokens
--- USDNEAR: 0
--- stNEAR: 20 Available (USD 50) + 80 Locked (USD 200)
-- Line of Credit
--- Limit: USDNEAR 50
-- Outstanding Loans:
--- owed: USDNEAR 100   [Repay]
--- Locked stNEAR (Collateral): 80 (USD 200) [Add Collateral]
--- Collateralization Ratio: 200%
-
-## Liquidation Event
+- Tokens  
+-- USDNEAR: 0  
+-- stNEAR: 20 Available (USD 50) + 80 Locked (USD 200)  
+- Line of Credit  
+-- Limit: USDNEAR 50  
+- Outstanding Loans:  
+-- owed: USDNEAR 100   [Repay]  
+-- Locked stNEAR (Collateral): 80 (USD 200) [Add Collateral]  
+-- Collateralization Ratio: 200%  
+### Liquidation Event
 
 Let's assume the NEAR price is now USD 1.50. With this new price Alice's account reads:
 
-- Tokens
--- USDNEAR: 0
--- stNEAR: 20 Available (USD 30) + 80 Locked (USD 120)
-- Line of Credit
--- Limit: USDNEAR 50
-- Outstanding Loans:
--- owed: USDNEAR 100   [Repay]
--- Locked stNEAR (Collateral): 80 (USD 120) 
--- Collateralization Ratio: 120% **OPEN FOR LIQUIDATION** [Add Collateral]
+- Tokens  
+-- USDNEAR: 0  
+-- stNEAR: 20 Available (USD 30) + 80 Locked (USD 120)  
+- Line of Credit  
+-- Limit: USDNEAR 50  
+- Outstanding Loans:  
+-- owed: USDNEAR 100   [Repay]  
+-- Locked stNEAR (Collateral): 80 (USD 120)   
+-- Collateralization Ratio: 120% **OPEN FOR LIQUIDATION** [Add Collateral]  
 
 At this point Alice's debt is open for liquidation because it's collateral is less than 150%
 
