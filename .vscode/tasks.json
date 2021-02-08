@@ -1,0 +1,42 @@
+{
+	"version": "2.0.0",
+
+	"tasks": [
+
+		{
+			"label": "build WASM",
+			"type": "shell",
+			"command": "bash build.sh",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "build",
+				"isDefault": true,
+			},
+		},
+
+		{
+			"label": "only cargo test -- --nocapture",
+			"type": "shell",
+			"command": "clear && cargo test",
+			"problemMatcher": [
+				"$rustc"
+			],
+		},
+
+		{
+			"type": "shell",
+			"label": "simulation test",
+			"command": "clear && cd divpool && cargo test -- --nocapture",
+			"problemMatcher": [
+				"$rustc"
+			],
+			"group": {
+				"kind": "test",
+				"isDefault": true,
+			},
+			"dependsOn":["build WASM"]
+		}
+	]
+}
