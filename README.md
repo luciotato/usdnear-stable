@@ -19,16 +19,15 @@ Because staked NEAR receive staking rewards each epoch (every 12hs) the collater
 
 ### Collateral Price Oracle
 
-Collateralization levels are determined by using price data reported by an oracle external to the smart contract. To make it harder to manipulate the market and cause premature liquidation of multiple loans, the price data should ideally not be based on the instantaneous price but rather a moving average (MA) over some sufficiently long period (but not too long, to avoid excessive delays). Otherwise, it is relatively easy to cause a flash crash which will be reflected in the instantaneous price feed. With this method, it is much harder to keep the price away from equilibrium for a long time in order to significantly affect the MA price.
-Every hour, the contract operator computes the average NEAR price in USD from one or more exchange markets and send the information to the smart contract. That price determines the ratio of collateralization and the exchange rate for the conversion window.
+Collateralization levels are determined by using price data reported by an oracle external to the smart contract. The price data should ideally not be based on the instantaneous price but rather a moving average (MA) over some sufficiently long period. Every hour, the contract operator computes the average NEAR price in USD from one or more exchange markets and send the information to the smart contract. That price determines the ratio of collateralization and the exchange rate for the conversion window.
 
 ### Conversion Window
 
-Any USDNEAR token owner can convert their token into stNEAR. The amount of stNEAR the user receives is computed from the market price of NEAR so the conversion is always 1 USDNEAR = 1 USD worth of stNEAR. The conversion window transfer the amount of stNEAR from the collateral pool to the user, and receives and burns USDNEAR. Since USDNEAR is burn, the total Overcollateralization ration remains the same.  This conversion mechanism does not change any of the existing loans. The users with outstanding loans still need to repay their loans in order to free their collateral.
+Any USDNEAR token owner can convert their token into stNEAR. The amount of stNEAR the user receives is computed from the market price of NEAR so the conversion is always "1 USDNEAR" = "1 USD worth of stNEAR". The conversion window transfer the amount of stNEAR from the collateral pool to the user, and receives and burns USDNEAR. Since USDNEAR is burned, the total Overcollateralization ratio remains the same.  This conversion mechanism does not change any of the existing loans. The users with outstanding loans still need to repay their loans in order to free their collateral.
 
-The existence of a conversion fixed-rate window where 1 USENEAR = 1 USD worth of stNEAR, guarantees the stability of USDNEAR. The overcollateralization guarantees conversion availability protected form the collateral asset (NEAR) price volatility.
+The existence of a conversion fixed-rate window where "1 USDNEAR" = "1 USD worth of stNEAR", guarantees the stability of USDNEAR. The overcollateralization guarantees conversion availability, protecting USDNEAR holders form the collateral asset (stNEAR) price volatility.
 
-The users exchanging USDNEAR in the conversion window are only those users that received the token as payment or in exchange for other assets and want to convert USDNEAR to stNEAR. Other token owner could choose to expend their USDNEAR, keeping the coins on circulation. The users with oustanding loans use the USDNEAR they receive to reduce or repay their loans.
+The main users exchanging USDNEAR on the conversion window are those users that received USDNEAR token as payment or in exchange for other assets and want to convert USDNEAR to stNEAR. Other token owners could choose to expend their USDNEAR, keeping the coins on circulation. The users with oustanding loans use the USDNEAR they receive to reduce or repay their loans.
 
 ### Minimum collateralization and Liquidation
 
@@ -36,7 +35,7 @@ The large 200% collateral is needed to protect against the inherent volatility o
 
 If the borrower fails to refill the collateral on time and the actual collateralization ratio drops below the minimum, the loan is "open for liquidation". Any other user with an account in the contract can "buy" part of the loan by sending USDNEAR, and receives in return 110% worth of stNEAR from the collateral (10% profit)
 
-The USDNEAR is used to partially repay the loan in order to raise the collateralization ratio up to 175%. The max amount of USDNEAR that the liquidator can buy is computed as to raise the loan collateralization ratio up to 175% (the average between the initial and minimun collateralization ratio)
+The USDNEAR is used to partially repay the loan in order to raise the collateralization ratio up to 175%. The max amount of USDNEAR that the liquidator can "repay" is computed as to raise the collateralization ratio up to 175% (the average between the initial and minimun collateralization ratio)
 
 Liquidators must have their own mechanism to identify "open for liquidation" loans. The contract will provide an API to inform (in batches) the state of all the oustanding loans. The first valid transaction buying the loan gets the 10% profit liquidation fee.
 
