@@ -13,7 +13,7 @@ const DEFAULT_AUDITOR_ACCOUNT_ID: &str = "auditors.near";
 
 use near_sdk::{env, ext_contract, near_bindgen, AccountId};
 use near_sdk::json_types::Base58PublicKey;
-use near_sdk::collections::{UnorderedMap};
+use near_sdk::collections::{UnorderedMap,LookupSet};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 
 pub use crate::internal::*;
@@ -152,6 +152,10 @@ pub struct UsdNearStableCoin {
     // Configurable info for [NEP-129](https://github.com/nearprotocol/NEPs/pull/129)
     pub web_app_url: Option<String>, 
     pub auditor_account_id: Option<String>,
+
+    //locked accounts while transferring via promises & callbacks
+    busy_accounts: LookupSet<String>, 
+
 }
 
 impl Default for UsdNearStableCoin {
@@ -190,6 +194,7 @@ impl UsdNearStableCoin {
             total_stbl: 0,
             usdnear_balances: PersistentMap::new("U".into()),
             b_accounts: UnorderedMap::new("A".into()),
+            busy_accounts: LookupSet::new("B".into()),
             usdnear_apr_basis_points: 250,   //2.5%
         };
     }

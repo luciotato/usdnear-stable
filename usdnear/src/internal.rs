@@ -32,6 +32,11 @@ impl UsdNearStableCoin {
     pub(crate) fn internal_withdraw_stnear(&mut self, stnear_amount_requested: u128) {
         
         let account_id = env::predecessor_account_id();
+
+        if self.busy_accounts.contains(&account_id) {
+            panic!("account is busy");
+        }
+
         let acc = self.internal_get_account(&account_id);
 
         let total_stnear = self.amount_from_collateral_shares(acc.collateral_shares);
@@ -48,6 +53,8 @@ impl UsdNearStableCoin {
         if stnear_available - stnear_amount_requested < ONE_NEAR_CENT/2  //small yotctos remain, withdraw all
             { stnear_available } 
         else  { stnear_amount_requested };
+
+        self.busy_accounts.insert(&account_id);
 
         //launch async to trasnfer stNEAR from this contract to the user
         ext_meta_pool::ft_transfer(
@@ -81,6 +88,7 @@ impl UsdNearStableCoin {
             //the stNEAR transfer was successful
             self.remove_amount_and_shares_preserve_share_price(&account_id,amount);
         }
+        self.busy_accounts.remove(&account_id);
     }
 
 
