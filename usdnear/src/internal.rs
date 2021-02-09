@@ -59,7 +59,7 @@ impl UsdNearStableCoin {
             NO_DEPOSIT,
             gas::TRANSFER_STNEAR,
         )
-        .then(ext_self_owner::after_transfer_stnear_to_user( //after transfer continue here
+        .then(ext_self_owner::after_transfer_stnear_to_user( //after transfer callback here
             account_id,
             amount_to_transfer,
             //------------
@@ -77,18 +77,10 @@ impl UsdNearStableCoin {
         amount: u128,
     ) {
         assert_callback_calling();
-
-        //if we reached here, the stNEAR trasnfer was successful
-
-        //remove stNear from contract and account
-        let shares = self.collateral_shares_from_amount(amount);
-
-        self.total_collateral_stnear -= amount;
-        self.total_collateral_shares -= shares;//burn total shares
-
-        let mut acc = self.internal_get_account(&account_id);
-        acc.collateral_shares -= shares; //burn acc shares
-        self.internal_update_account(&account_id, &acc);
+        if is_promise_success() {
+            //the stNEAR transfer was successful
+            self.remove_amount_and_shares_preserve_share_price(&account_id,amount);
+        }
     }
 
 
@@ -107,6 +99,27 @@ impl UsdNearStableCoin {
                 // Increasing the total amount of "stake" shares.
                 self.total_collateral_shares += num_shares;
                 self.total_collateral_stnear += amount;
+            }
+        }
+    }
+
+    pub(crate) fn remove_amount_and_shares_preserve_share_price(
+        &mut self,
+        account_id: &AccountId,
+        amount: u128,
+    ) {
+        if amount > 0 {
+            let num_shares = self.collateral_shares_from_amount(amount);
+            if num_shares > 0 {
+                //burn shares in the user acc
+                let acc = &mut self.internal_get_account(account_id);
+                let net_shares = acc.collateral_shares - acc.locked_collateral_shares;
+                assert!( net_shares >= num_shares, "ERR NET collateral shares {} < num_shares_to_remove {}",net_shares,num_shares);
+                acc.collateral_shares -= num_shares;
+                self.internal_update_account(account_id, &acc);
+                // reduce stNEAR amount and burn total shares in the contract
+                self.total_collateral_shares -= num_shares;
+                self.total_collateral_stnear -= amount;
             }
         }
     }
@@ -133,7 +146,7 @@ impl UsdNearStableCoin {
         if account.is_empty() {
             self.b_accounts.remove(account_id); //delete
         } else {
-            self.b_accounts.insert(account_id, &account); //insert_or_update
+            self.b_accounts.insert(account_id, account); //insert_or_update
         }
     }
 

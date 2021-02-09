@@ -194,24 +194,26 @@ impl UsdNearStableCoin {
         };
     }
 
-    /// Withdraws stNEAR from this contract to the user's account
-    pub fn withdraw(&mut self, amount: U128String) {
-        self.internal_withdraw_stnear(amount.into());
-    }
-
-
-    ///NEP-141 fungible token standard receiveing contract
-    /// This fn is called by the stNEAR token contract, when the user makes a transfer to this contract
-    /// the amount is transferred and then this fn is executed, it must return the unused amount
+    /// ---Indirect DEPOSIT--- (NEP-141 fungible token standard)
+    /// To "deposit" some stNEAR the web app must call META_POOL_STNEAR_CONTRACT.ft_transfer_call("usdnear.stable.testnet", [amount])
+    /// the amount is transferred and then the META_POOL_STNEAR_CONTRACT will call this fn ft_on_transfer
     pub fn ft_on_transfer(
         &mut self,
         sender_id: AccountId,
         amount: U128String,
         _msg: String,
-    ) -> U128String { 
-
+    ) -> u128 { 
+        //verify this is a callback from META_POOL_STNEAR_CONTRACT
+        assert_eq!(env::predecessor_account_id(), META_POOL_STNEAR_CONTRACT);
+        //register the stNEAR into our internal accounting for the sender
         self.add_amount_and_shares_preserve_share_price(sender_id, amount.0);
-        return 0.into();
+        //all stNEAR used
+        return 0;
+    }
+
+    /// Withdraws stNEAR from this contract to the user's META_POOL_STNEAR_CONTRACT account
+    pub fn withdraw(&mut self, amount: U128String) {
+        self.internal_withdraw_stnear(amount.into());
     }
 
 }

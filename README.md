@@ -14,8 +14,8 @@ The total supply of stablecoins increases as a new loan is issued, and decreases
 
 ### Interest
 
-The interest on the issued USDNEAR will be computed as to be 4% Effective Annual Interest Rate, and collected on each epoch in the same process of computing staking rewards.
-Because staked NEAR receive staking rewards each epoch (every 12hs) the collateral will tend to naturally increase in value. The APY for staked near is around 10% now (Feb-2021), so initially the rewards will be more than enough to cover the interest on the loans.
+The interest on the issued USDNEAR will be computed as to be 2.5% Effective Annual Interest Rate, and collected on each epoch in the same process of computing staking rewards.
+Considering that staked NEAR receive staking rewards each epoch (every 12hs) the collateral will tend to naturally increase in value. The APY for staked near is around 10% now (Feb-2021), so initially the rewards will be more than enough to cover the interest on the loans.
 
 ### Collateral Price Oracle
 
@@ -35,7 +35,7 @@ The large 200% collateral is needed to protect against the inherent volatility o
 
 If the borrower fails to refill the collateral on time and the actual collateralization ratio drops below the minimum, the loan is "open for liquidation". Any other user with an account in the contract can "buy" part of the loan by sending USDNEAR, and receives in return 110% worth of stNEAR from the collateral (10% profit)
 
-The USDNEAR is used to partially repay the loan in order to raise the collateralization ratio up to 175%. The max amount of USDNEAR that the liquidator can "repay" is computed as to raise the collateralization ratio up to 175% (the average between the initial and minimun collateralization ratio)
+The USDNEAR is used to partially repay the loan in order to raise the collateralization ratio up to 200%. The max amount of USDNEAR that the liquidator can "repay" is computed as to restore the collateralization ratio to 200%
 
 Liquidators must have their own mechanism to identify "open for liquidation" loans. The contract will provide an API to inform (in batches) the state of all the oustanding loans. The first valid transaction buying the loan gets the 10% profit liquidation fee.
 
@@ -49,58 +49,89 @@ Once Alice deposits the collateral, a "credit limit" is computed according to th
 Alice account now reads:
 - Tokens
   - USDNEAR: 0
-  - stNEAR: 100 Available (USD 250) [Deposit]
 - Line of Credit
-  - Limit: USDNEAR 125 [Take Loan]
+  - USDNEAR: 125 [Take Loan]
+- Collateral
+  - Total: stNEAR: 100 (USD 250) [Add Collateral]
+  - Locked: stNEAR 0
 - Outstanding Loans:
   - owed: USDNEAR 0
-  - Locked Collateral: stNEAR 0
 
 
 If Alice chooses to borrow USDNEAR 100, USDNEAR 100 are minted into Alice's account, and USD 200 value of collateral is locked and trasnferred to the collateral pool. The global amount of minted USDNEAR will be increased by 100 and the value of the collateral pool will be incresed by stNEAR valued USD 200, keeping the global overcollateralization constant.
 
 Alice account now reads:
 - Tokens  
-  - USDNEAR: 100  
-  - stNEAR: 20 Available (USD 50) [Deposit]
+  - USDNEAR: 100  [Transfer]
 - Line of Credit  
-  - Limit: USDNEAR 50  
+  - USDNEAR: 50  [Take Loan]
+- Collateral
+  - Total: stNEAR: 100 (USD 250) [Add Collateral]
+  - Locked: stNEAR 80 (USD 200) 
+  - Free: stNEAR 20 (USD 50) 
 - Outstanding Loans:  
   - owed: USDNEAR 100   [Repay]  
-  - Locked stNEAR (Collateral): 80 (USD 200) [Add Collateral]  
   - Collateralization Ratio: 200%  
 
 Let's assume Alice trasnfers USDNEAR 100 to Bob
 
 Bob account now reads:
 - Tokens  
-  - USDNEAR: 100  
+  - USDNEAR: 100 [Transfer]
 
 and Alice account reads:
 - Tokens  
-  - USDNEAR: 0  
-  - stNEAR: 20 Available (USD 50) [Deposit]
+  - USDNEAR: 0  [Transfer]
 - Line of Credit  
   - Limit: USDNEAR 50  
+- Collateral
+  - Total: stNEAR: 100 (USD 250) [Add Collateral]
+  - Locked: stNEAR 80 (USD 200) 
+  - Free: stNEAR 20 (USD 50) 
 - Outstanding Loans:  
   - owed: USDNEAR 100   [Repay]  
-  - Locked stNEAR (Collateral): 80 (USD 200) [Add Collateral]  
   - Collateralization Ratio: 200%  
 ### Liquidation Event
 
-Let's assume the NEAR price is now USD 1.50. With this new price Alice's account reads:
+Let's assume the NEAR price is now USD 1.4240. With this new price Alice's account reads:
 
 - Tokens  
   - USDNEAR: 0  
-  - stNEAR: 20 Available (USD 30) [Deposit]
 - Line of Credit  
-  - Limit: USDNEAR 50  
+  - Limit: USDNEAR 0
+- Collateral
+  - Total: stNEAR: 100 (USD 142.40) [Add Collateral]
+  - Locked: stNEAR 100 (USD 142.40) 
+  - Free: stNEAR 0 (USD 0) 
 - Outstanding Loans:  
   - owed: USDNEAR 100   [Repay]  
-  - Locked stNEAR (Collateral): 80 (USD 120) [Add Collateral]
-  - Collateralization Ratio: 120% **OPEN FOR LIQUIDATION** 
+  - Collateralization Ratio: 142.4% **OPEN FOR LIQUIDATION** 
 
-At this point Alice's debt is open for liquidation because it's collateral is less than 150%
+At this point Alice's debt is open for liquidation because it's collateral is less than 150%. 
+
+A liquidator will be able to repay USDNEAR 64 from Alice's loan and will receive USD 70.4 worth of stNEAR from Alice's locked collateral (10% profit).
+
+After repaying USDNEAR 64, Alice's new owed amount is USDNEAR 36, and her remainig collateral is valued USD 72 so her new Collateralization Ratio is 72/36 => 200%
+
+The amount a liquidator can repay is computed as: 
+```
+open_to_liquidate_USDNEAR = (collateral_value - 200% * owed) / (110% - 200%) 
+```
+ so after liquidation the Collateralization Ratio is back to 200% considering  a 10% liquidation fee.
+
+After Liquidation, Alice's account reads:
+
+- Tokens  
+  - USDNEAR: 0  
+- Line of Credit  
+  - Limit: USDNEAR 0
+- Collateral
+  - Total: stNEAR: 50.5618 (USD 72) [Add Collateral]
+  - Locked: stNEAR 50.5618 (USD 72)
+  - Free: stNEAR 0 (USD 0) 
+- Outstanding Loans:  
+  - owed: USDNEAR 36 [Repay]  
+  - Collateralization Ratio: 200%
 
 
 -------------------
