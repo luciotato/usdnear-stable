@@ -13,7 +13,7 @@ const DEFAULT_AUDITOR_ACCOUNT_ID: &str = "auditors.near";
 
 use near_sdk::{env, ext_contract, near_bindgen, AccountId};
 use near_sdk::json_types::Base58PublicKey;
-use near_sdk::collections::{PersistentMap,UnorderedMap};
+use near_sdk::collections::{UnorderedMap};
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 
 pub use crate::internal::*;
@@ -28,6 +28,9 @@ pub mod utils;
 pub mod getters;
 pub mod internal;
 pub mod owner;
+pub mod persistent_map;
+
+pub use persistent_map::*;
 
 #[cfg(target = "wasm32")]
 #[global_allocator]
@@ -35,9 +38,20 @@ static ALLOC: near_sdk::wee_alloc::WeeAlloc = near_sdk::wee_alloc::WeeAlloc::INI
 
 pub const NSLP_INTERNAL_ACCOUNT: &str = "..NSLP..";
 
-#[ext_contract(ext_staking_pool)]
-pub trait ExtstNEARContract {
+#[ext_contract(ext_meta_pool)]
+pub trait ExtMetaPoolContract {
     fn get_account_staked_balance(&self, account_id: AccountId) -> U128String;
+    fn ft_transfer(account_id: AccountId, amount_to_transfer: U128String, memo:String);
+}
+
+// callbacks here defined as traits to make it easy to create the promise
+#[ext_contract(ext_self_owner)]
+pub trait OwnerCallbacks {
+    fn after_transfer_stnear_to_user(
+        &mut self,
+        account_id: String,
+        amount: u128,
+    );
 }
 
 // -----------------
@@ -63,7 +77,6 @@ pub struct BorrowingAccount {
 impl Default for BorrowingAccount {
     fn default() -> Self {
         Self {
-            usdnear: 0,
             collateral_shares: 0,
             locked_collateral_shares:0,
             outstanding_loans_usdnear:0,
@@ -78,7 +91,7 @@ impl BorrowingAccount {
         return self.collateral_shares == 0
             && self.stbl == 0
             && self.locked_collateral_shares == 0
-            && self.oustanding_loans_usdnear == 0
+            && self.outstanding_loans_usdnear == 0
             ;
     }
 }
@@ -93,20 +106,18 @@ pub struct UsdNearStableCoin {
     /// Owner's account ID (it will be a DAO on phase II)
     pub owner_account_id: String,
 
-    /// There's a min balance you must mantain to backup storage usage
-    /// can be adjusted down by keeping the required NEAR in the developers or operator account
-    pub min_account_balance: u128,
-
-    // Configurable info for [NEP-129](https://github.com/nearprotocol/NEPs/pull/129)
-    pub web_app_url: Option<String>, 
-    pub auditor_account_id: Option<String>,
+    /// updated by external oracle
+    pub current_stnear_price: u128,
 
     /// This amount increments with minting (borrowing) and decrements with burns (repayment)
     pub total_usdnear: u128,
 
+    /// This amount increments with users depositing stNEAR and decrements with users withdrawing stNEAR
+    /// This amouns also is incremented when the staking rewards are collected every epoch
+    pub total_collateral_stnear: u128,
     /// how many "collateral shares" were minted. Everytime someone desposits stNEAR (collateral) they get collateral_shares
-    // the buy share price is computed so if she "sells" the shares on that moment she recovers the same stNEAR amount
-    // when someone withdraws stNEAR they burn X shares at current price to recoup Y stNEAR
+    /// the buy share price is computed so if they "sells" the shares on that moment they recover the same stNEAR amount
+    /// when someone withdraws stNEAR they burn X shares at current price to recoup Y stNEAR
     pub total_collateral_shares: u128,
 
     /// STBL is the governance token. Total stbl minted
@@ -133,6 +144,14 @@ pub struct UsdNearStableCoin {
     pub treasury_account_id: String,
     /// treasury cut on SHKASH Sell cut (25% default)
     pub treasury_fee_basis_points: u16,
+
+    /// There's a min balance you must mantain to backup storage usage
+    /// can be adjusted down by keeping the required NEAR in the developers or operator account
+    pub min_account_balance: u128,
+
+    // Configurable info for [NEP-129](https://github.com/nearprotocol/NEPs/pull/129)
+    pub web_app_url: Option<String>, 
+    pub auditor_account_id: Option<String>,
 }
 
 impl Default for UsdNearStableCoin {
@@ -143,19 +162,6 @@ impl Default for UsdNearStableCoin {
 
 #[near_bindgen]
 impl UsdNearStableCoin {
-    /* NOTE
-    This contract implements several traits
-
-    1. deposit-trait [NEP-xxx]: this contract implements: deposit, get_account_total_balance, get_account_available_balance, withdraw, withdraw_all
-       A [NEP-xxx] contract creates an account on deposit and allows you to withdraw later under certain conditions. Deletes the account on withdraw_all
-
-    4. multitoken (TODO) [NEP-xxx]: this contract implements: deposit(tok), get_token_balance(tok), withdraw_token(tok), tranfer_token(tok), transfer_token_to_contract(tok)
-       A [NEP-xxx] manages multiple tokens
-
-    */
-
-    /// Requires 25 TGas (1 * BASE_GAS)
-    ///
     /// Initializes UsdNearStableCoin contract.
     /// - `owner_account_id` - the account ID of the owner.  Only this account can call owner's methods on this contract.
     #[init]
@@ -163,6 +169,7 @@ impl UsdNearStableCoin {
         owner_account_id: AccountId,
         treasury_account_id: AccountId,
         operator_account_id: AccountId,
+        current_stnear_price: U128String,
     ) -> Self {
         assert!(!env::state_exists(), "The contract is already initialized");
 
@@ -170,13 +177,13 @@ impl UsdNearStableCoin {
             owner_account_id,
             operator_account_id,
             treasury_account_id,
-            min_account_balance: ONE_NEAR,
+            current_stnear_price: current_stnear_price.0,
+            min_account_balance: NEAR,
             web_app_url: Some(String::from(DEFAULT_WEB_APP_URL)),
             auditor_account_id: Some(String::from(DEFAULT_AUDITOR_ACCOUNT_ID)),
-            operator_fee_basis_points: DEFAULT_OPERATOR_REWARDS_FEE_BASIS_POINTS,
-            operator_swap_cut_basis_points: DEFAULT_OPERATOR_SWAP_CUT_BASIS_POINTS,
-            treasury_fee_basis_points: DEFAULT_TREASURY_SWAP_CUT_BASIS_POINTS,
-            borrowing_paused: false, 
+            operator_fee_basis_points: 3000, //30%
+            treasury_fee_basis_points: 7000, //70%
+            borrowing_paused: false,  //starts paused until it gets the first current_stnear_price
             total_usdnear: 0,
             total_collateral_stnear: 0,
             total_collateral_shares: 0,
@@ -186,6 +193,25 @@ impl UsdNearStableCoin {
             usdnear_apr_basis_points: 250,   //2.5%
         };
     }
-  
+
+    /// Withdraws stNEAR from this contract to the user's account
+    pub fn withdraw(&mut self, amount: U128String) {
+        self.internal_withdraw_stnear(amount.into());
+    }
+
+
+    ///NEP-141 fungible token standard receiveing contract
+    /// This fn is called by the stNEAR token contract, when the user makes a transfer to this contract
+    /// the amount is transferred and then this fn is executed, it must return the unused amount
+    pub fn ft_on_transfer(
+        &mut self,
+        sender_id: AccountId,
+        amount: U128String,
+        _msg: String,
+    ) -> U128String { 
+
+        self.add_amount_and_shares_preserve_share_price(sender_id, amount.0);
+        return 0.into();
+    }
 
 }

@@ -1,11 +1,11 @@
 use near_sdk::{env, PromiseResult};
 pub use crate::types::*;
 
-macro_rules! debug {
-    ($($arg:tt)*) => ({
-        env::log(format!($($arg)*).as_bytes());
-    });
-}
+// macro_rules! debug {
+//     ($($arg:tt)*) => ({
+//         env::log(format!($($arg)*).as_bytes());
+//     });
+// }
 
 #[macro_export]
 macro_rules! log {
@@ -13,7 +13,7 @@ macro_rules! log {
         env::log(format!($($arg)*).as_bytes());
     });
 }
-
+pub const MIN_BALANCE_FOR_STORAGE:u128 = 5*NEAR;
 pub fn assert_min_balance(amount:u128){
     assert!(amount > 0, "Amount should be positive");
     assert!(

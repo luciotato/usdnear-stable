@@ -23,14 +23,14 @@ impl UsdNearStableCoin {
     /// full account info
     /// Returns JSON representation of the account for the given account ID.
     pub fn get_account_info(&self, account_id: AccountId) -> GetAccountInfoResult {
-        let usdnear = self.usdnear_balance(&account_id); 
+        let usdnear = self.usdnear_balances.get(&account_id).unwrap_or_default(); 
         let acc = self.internal_get_account(&account_id);
         let stnear = self.amount_from_collateral_shares(acc.collateral_shares);
         return GetAccountInfoResult {
             account_id,
             usdnear: usdnear.into(),
             stnear: stnear.into(),
-            stbl: acc.stbl(self).into(),
+            stbl: acc.stbl.into(),
             outstanding_loans_usdnear: acc.outstanding_loans_usdnear.into(),
         };
     }
@@ -63,14 +63,12 @@ impl UsdNearStableCoin {
     /// Returns JSON representation of the contract state
     pub fn get_contract_state(&self) -> GetContractStateResult {
 
-        let lp_account = self.internal_get_nslp_account();
-
         return GetContractStateResult {
             total_usdnear: self.total_usdnear.into(),
             total_collateral_stnear: self.total_collateral_stnear.into(),
             total_stbl: self.total_stbl.into(),
             balances_count: self.usdnear_balances.len().into(),
-            accounts_count: self.b_accounts.len().into(),
+            b_accounts_count: self.b_accounts.len().into(),
             current_stnear_price: self.current_stnear_price.into(),
             total_collateral_shares: self.total_collateral_shares.into(),
             usdnear_apr_basis_points: self.usdnear_apr_basis_points,

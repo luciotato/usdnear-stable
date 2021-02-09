@@ -1,5 +1,5 @@
 use crate::*;
-use near_sdk::{near_bindgen, Balance, Promise};
+use near_sdk::{near_bindgen, Balance};
 
 pub use crate::types::*;
 pub use crate::utils::*;
@@ -51,15 +51,19 @@ impl UsdNearStableCoin {
 
         //launch async to trasnfer stNEAR from this contract to the user
         ext_meta_pool::ft_transfer(
-            &account_id,
+            account_id.clone(),
             amount_to_transfer.into(),
             String::from(""), //memo
+            //------------
+            &META_POOL_STNEAR_CONTRACT,
             NO_DEPOSIT,
             gas::TRANSFER_STNEAR,
         )
         .then(ext_self_owner::after_transfer_stnear_to_user( //after transfer continue here
-            &account_id,
+            account_id,
             amount_to_transfer,
+            //------------
+            &env::current_account_id(),
             NO_DEPOSIT,
             gas::AFTER_TRANSFER_STNEAR,
         ));
@@ -72,6 +76,10 @@ impl UsdNearStableCoin {
         account_id: String,
         amount: u128,
     ) {
+        assert_callback_calling();
+
+        //if we reached here, the stNEAR trasnfer was successful
+
         //remove stNear from contract and account
         let shares = self.collateral_shares_from_amount(amount);
 
@@ -79,7 +87,7 @@ impl UsdNearStableCoin {
         self.total_collateral_shares -= shares;//burn total shares
 
         let mut acc = self.internal_get_account(&account_id);
-        acc.total_collateral_shares -= shares; //burn acc shares
+        acc.collateral_shares -= shares; //burn acc shares
         self.internal_update_account(&account_id, &acc);
     }
 

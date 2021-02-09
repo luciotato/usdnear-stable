@@ -3,14 +3,16 @@ use near_sdk::serde::{Deserialize, Serialize};
 use near_sdk::{AccountId};
 use uint::construct_uint;
 
+pub const META_POOL_STNEAR_CONTRACT: &str = "meta.pool.testnet";
+
 /// useful constants
 pub const NO_DEPOSIT: u128 = 0;
-pub const ONE_NEAR: u128 = 1_000_000_000_000_000_000_000_000;
-pub const ONE_NEAR_CENT: u128 = ONE_NEAR/100;
-pub const TWO_NEAR: u128 = 2 * ONE_NEAR;
-pub const FIVE_NEAR: u128 = 5 * ONE_NEAR;
-pub const TEN_NEAR: u128 = 10 * ONE_NEAR;
-pub const NEAR_1K: u128 = 1_000 * ONE_NEAR;
+pub const NEAR: u128 = 1_000_000_000_000_000_000_000_000;
+pub const ONE_NEAR_CENT: u128 = NEAR/100;
+pub const TWO_NEAR: u128 = 2 * NEAR;
+pub const FIVE_NEAR: u128 = 5 * NEAR;
+pub const TEN_NEAR: u128 = 10 * NEAR;
+pub const NEAR_1K: u128 = 1_000 * NEAR;
 
 pub const DEVELOPERS_ACCOUNT_ID: &str = "developers.near"; 
 
@@ -60,6 +62,7 @@ pub struct GetAccountInfoResult {
     pub usdnear: U128,
     pub stnear: U128,
     pub stbl: U128,
+    pub outstanding_loans_usdnear: U128,
 }
 
 /// Struct returned from get_contract_state
@@ -70,13 +73,15 @@ pub struct GetAccountInfoResult {
 pub struct GetContractStateResult {
     pub total_usdnear: U128,
     pub total_collateral_stnear: U128,
-    pub total_collateral_shares: U128,
+    pub current_stnear_price: U128,
     /// total stbl minted
     pub total_stbl: U128, 
     //how many usdnear balances there are
     pub balances_count: U64,
     //how many b_accounts there are
     pub b_accounts_count: U64,
+    pub total_collateral_shares: U128,
+    pub usdnear_apr_basis_points: u16,
 }
 
 /// Struct returned from get_contract_params
