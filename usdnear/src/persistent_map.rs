@@ -1,4 +1,4 @@
-//! The same as near_sdk::collections::lookup_map, but keeps a count of inserted keys (len)
+//! The same as near_sdk::collections::lookup_map, but keeps also the length of the map
 //! A persistent map without iterators. Unlike `near_sdk::collections::UnorderedMap` this map
 //! doesn't store keys and values separately in vectors, so it can't iterate over keys. But it
 //! makes this map more efficient in the number of reads and writes.

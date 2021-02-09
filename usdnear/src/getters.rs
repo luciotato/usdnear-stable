@@ -30,8 +30,10 @@ impl UsdNearStableCoin {
             account_id,
             usdnear: usdnear.into(),
             stnear: stnear.into(),
+            locked_stnear: acc.locked_collateral_stnear(&self).into(),
             stbl: acc.stbl.into(),
             outstanding_loans_usdnear: acc.outstanding_loans_usdnear.into(),
+            collateralization_ratio: acc.get_current_collateralization_ratio(&self),
         };
     }
 
@@ -78,6 +80,8 @@ impl UsdNearStableCoin {
     /// Returns JSON representation of contract parameters
     pub fn get_contract_params(&self) -> ContractParamsJSON {
         return ContractParamsJSON {
+            collateral_basis_points: self.collateral_basis_points,
+            min_collateral_basis_points: self.min_collateral_basis_points,
             borrowing_paused: self.borrowing_paused,
             min_account_balance: self.min_account_balance.into(),
             usdnear_apr_basis_points: self.usdnear_apr_basis_points,
@@ -91,13 +95,21 @@ impl UsdNearStableCoin {
 
         self.assert_owner_calling();
 
+        assert!(params.collateral_basis_points>120*PERCENT_BP);
+        self.collateral_basis_points = params.collateral_basis_points;
+
+        assert!(params.min_collateral_basis_points>110*PERCENT_BP);
+        self.min_collateral_basis_points = params.min_collateral_basis_points;
+
+        self.borrowing_paused = params.borrowing_paused;
+
         self.min_account_balance = params.min_account_balance.0;
 
         self.usdnear_apr_basis_points = params.usdnear_apr_basis_points;
 
+        assert!(params.operator_fee_basis_points+params.treasury_fee_basis_points==10000,"fee split must add 100%");
         self.operator_fee_basis_points = params.operator_fee_basis_points;
         self.treasury_fee_basis_points = params.treasury_fee_basis_points;
-
     }
     
 }

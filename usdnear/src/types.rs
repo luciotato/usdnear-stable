@@ -14,6 +14,8 @@ pub const FIVE_NEAR: u128 = 5 * NEAR;
 pub const TEN_NEAR: u128 = 10 * NEAR;
 pub const NEAR_1K: u128 = 1_000 * NEAR;
 
+pub const PERCENT_BP: u32 = 100; //amount to multyply a percentage to convert to basis points. e.g. 2.5*PERCENT_BP = 250 = 2.5%
+
 pub const DEVELOPERS_ACCOUNT_ID: &str = "developers.near"; 
 
 construct_uint! {
@@ -61,8 +63,10 @@ pub struct GetAccountInfoResult {
     pub account_id: AccountId,
     pub usdnear: U128,
     pub stnear: U128,
-    pub stbl: U128,
+    pub locked_stnear: U128,
     pub outstanding_loans_usdnear: U128,
+    pub collateralization_ratio: u32, //basis points, max 999%
+    pub stbl: U128,
 }
 
 /// Struct returned from get_contract_state
@@ -90,12 +94,13 @@ pub struct GetContractStateResult {
 #[derive(Serialize, Deserialize)]
 #[serde(crate = "near_sdk::serde")]
 pub struct ContractParamsJSON {
+    pub collateral_basis_points: u32,
+    pub min_collateral_basis_points: u32,
     pub borrowing_paused: bool, 
     pub min_account_balance: U128String,
-    pub usdnear_apr_basis_points: u16, //0.1%
+    pub usdnear_apr_basis_points: u16, //2.5% default
     /// operator_fee_basis_points. 100 basis point => 1%. E.g.: owner_fee_basis_points=50 => 0.5% owner's fee
     pub operator_fee_basis_points: u16,
     /// treasury_cut_basis_points. 
     pub treasury_fee_basis_points: u16,
-    
 }

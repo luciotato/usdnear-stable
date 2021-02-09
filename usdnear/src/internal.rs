@@ -40,8 +40,8 @@ impl UsdNearStableCoin {
         let acc = self.internal_get_account(&account_id);
 
         let total_stnear = self.amount_from_collateral_shares(acc.collateral_shares);
-        let locked_stnear = self.amount_from_collateral_shares(acc.locked_collateral_shares);
-        let stnear_available = total_stnear - locked_stnear;
+        let locked_stnear = acc.outstanding_loans_usdnear/self.current_stnear_price;
+        let stnear_available = total_stnear.saturating_sub(locked_stnear);
 
         assert!(
             stnear_available >= stnear_amount_requested,
@@ -100,14 +100,12 @@ impl UsdNearStableCoin {
     ) {
         if amount > 0 {
             let num_shares = self.collateral_shares_from_amount(amount);
-            if num_shares > 0 {
-                let account = &mut self.internal_get_account(&account_id);
-                account.collateral_shares += num_shares;
-                &self.internal_update_account(&account_id, &account);
-                // Increasing the total amount of "stake" shares.
-                self.total_collateral_shares += num_shares;
-                self.total_collateral_stnear += amount;
-            }
+            let account = &mut self.internal_get_account(&account_id);
+            account.collateral_shares += num_shares;
+            &self.internal_update_account(&account_id, &account);
+            // Increasing the total amount of "stake" shares.
+            self.total_collateral_shares += num_shares;
+            self.total_collateral_stnear += amount;
         }
     }
 
@@ -118,17 +116,17 @@ impl UsdNearStableCoin {
     ) {
         if amount > 0 {
             let num_shares = self.collateral_shares_from_amount(amount);
-            if num_shares > 0 {
-                //burn shares in the user acc
-                let acc = &mut self.internal_get_account(account_id);
-                let net_shares = acc.collateral_shares - acc.locked_collateral_shares;
-                assert!( net_shares >= num_shares, "ERR NET collateral shares {} < num_shares_to_remove {}",net_shares,num_shares);
-                acc.collateral_shares -= num_shares;
-                self.internal_update_account(account_id, &acc);
-                // reduce stNEAR amount and burn total shares in the contract
-                self.total_collateral_shares -= num_shares;
-                self.total_collateral_stnear -= amount;
-            }
+            //burn shares in the user acc
+            let acc = &mut self.internal_get_account(account_id);
+            //docuble-check can't remove locked collateral
+            let locked_stnear = acc.outstanding_loans_usdnear/self.current_stnear_price;
+            let net_shares = acc.collateral_shares - self.collateral_shares_from_amount(locked_stnear);
+            assert!( net_shares >= num_shares, "ERR NET collateral shares {} < num_shares_to_remove {}",net_shares,num_shares);
+            acc.collateral_shares -= num_shares;
+            self.internal_update_account(account_id, &acc);
+            // reduce stNEAR amount and burn total shares in the contract
+            self.total_collateral_shares -= num_shares;
+            self.total_collateral_stnear -= amount;
         }
     }
 

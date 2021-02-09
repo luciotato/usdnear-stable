@@ -91,10 +91,28 @@ impl BorrowingAccount {
             ;
     }
 
+    fn valued_collateral_usd(&self, main:&UsdNearStableCoin) -> u128 {
+        let actual_collateral_stnear = main.amount_from_collateral_shares(self.collateral_shares);
+        return main.stnear_to_usd(actual_collateral_stnear);
+    }
+
+    fn locked_collateral_stnear(&self, main:&UsdNearStableCoin) -> u128 {
+        if self.outstanding_loans_usdnear==0 {return 0}; 
+        let required_collateral_usdnear = apply_pct(main.collateral_basis_points, self.outstanding_loans_usdnear);
+        let required_collateral_stnear = main.usdnear_to_stnear(required_collateral_usdnear);
+        let actual_collateral_stnear = main.amount_from_collateral_shares(self.collateral_shares);
+        return if required_collateral_stnear<actual_collateral_stnear {required_collateral_stnear} else {actual_collateral_stnear};
+    }
+
+    //max usdnear for this acc, according to collateral, price and collateral_basis_points
+    fn max_usdnear(&self, main:&UsdNearStableCoin) -> u128 {
+        let valued_collateral_usd = self.valued_collateral_usd(main);
+        return (U256::from(valued_collateral_usd) * U256::from(10000) / U256::from(main.collateral_basis_points)).as_u128();
+    }
+
     fn get_current_credit_limit(&self, main:&UsdNearStableCoin) -> u128 {
-        let stnear = main.amount_from_collateral_shares(self.collateral_shares);
-        let max_usd = stnear * main.current_stnear_price;
-        return max_usd.saturating_sub(self.outstanding_loans_usdnear);
+        let max_usdnear = self.max_usdnear(main);
+        return max_usdnear.saturating_sub(self.outstanding_loans_usdnear);
     }
 
     /// returns basis points
@@ -102,10 +120,10 @@ impl BorrowingAccount {
     fn get_current_collateralization_ratio(&self, main:&UsdNearStableCoin) -> u32 {
         const MAX:u32 = 999*PERCENT_BP;
         if self.outstanding_loans_usdnear==0 {return MAX}; 
-        let collateral_value = main.amount_from_collateral_shares(self.collateral_shares) * main.current_stnear_price;
-        let result = collateral_value * 10000 / self.outstanding_loans_usdnear;
-        if result>MAX as u128 {return MAX}; 
-        return result as u32;
+        let valued_collateral = self.valued_collateral_usd(main);
+        let ratio = (U256::from(valued_collateral) * U256::from(10000) / U256::from(self.outstanding_loans_usdnear)).as_u128();
+        if ratio>MAX as u128 {return MAX}; 
+        return ratio as u32;
     }
 }
 
@@ -121,6 +139,13 @@ pub struct UsdNearStableCoin {
 
     /// updated by external oracle
     pub current_stnear_price: u128,
+
+    /// collateral % (default 200%)
+    pub collateral_basis_points: u32, 
+    
+    /// liquidation collateral % (default 150%)
+    /// collateral % when liquidation is opened
+    pub min_collateral_basis_points: u32, 
 
     /// This amount increments with minting (borrowing) and decrements with burns (repayment)
     pub total_usdnear: u128,
@@ -195,12 +220,15 @@ impl UsdNearStableCoin {
             operator_account_id,
             treasury_account_id,
             current_stnear_price: current_stnear_price.0,
+            collateral_basis_points: 200*PERCENT_BP,
+            min_collateral_basis_points: 150*PERCENT_BP,
             min_account_balance: NEAR,
             web_app_url: Some(String::from(DEFAULT_WEB_APP_URL)),
             auditor_account_id: Some(String::from(DEFAULT_AUDITOR_ACCOUNT_ID)),
-            operator_fee_basis_points: 3000, //30%
-            treasury_fee_basis_points: 7000, //70%
-            borrowing_paused: false,  //starts paused until it gets the first current_stnear_price
+            usdnear_apr_basis_points: 250,   //2.5%
+            operator_fee_basis_points: 3000, //30% from 2.5%
+            treasury_fee_basis_points: 7000, //70% from 2.5%
+            borrowing_paused: false,  
             total_usdnear: 0,
             total_collateral_stnear: 0,
             total_collateral_shares: 0,
@@ -208,10 +236,19 @@ impl UsdNearStableCoin {
             usdnear_balances: PersistentMap::new("U".into()),
             b_accounts: UnorderedMap::new("A".into()),
             busy_accounts: LookupSet::new("B".into()),
-            usdnear_apr_basis_points: 250,   //2.5%
         };
     }
 
+    //applies current_price to a stNEAR amount to get a USD valuation
+    fn stnear_to_usd(&self, stnear:u128) -> u128 {
+        return (U256::from(stnear) * U256::from(self.current_stnear_price) / U256::from(NEAR)).as_u128();
+    }
+
+    //applies current_price to convert from USDNEAR to stNEAR (collateral)
+    fn usdnear_to_stnear(&self, usdnear:u128) -> u128 {
+        return (U256::from(usdnear) * U256::from(NEAR) / U256::from(self.current_stnear_price)).as_u128();
+    }
+    
     /// ---Indirect DEPOSIT/ADD COLLATERAL--- (NEP-141 fungible token standard)
     /// To "deposit some stNEAR"/"add collateral" the web app must call META_POOL_STNEAR_CONTRACT.ft_transfer_call("usdnear.stable.testnet", [amount])
     /// the amount is transferred and then the META_POOL_STNEAR_CONTRACT will call this fn ft_on_transfer
@@ -235,11 +272,21 @@ impl UsdNearStableCoin {
     }
 
     pub fn take_loan(&mut self, usdnear_amount:U128String) {
+        assert!(usdnear_amount.0>=1*NEAR,"min loan is 1 USDNEAR");
+        //get account
         let mut acc = self.internal_get_account(&env::predecessor_account_id());
+        //get current creditr limit
         let limit = acc.get_current_credit_limit(&self);
         assert!(usdnear_amount.0<=limit,"You can only take USDNEAR {} as loan. Add more collateral to extend your credit",limit);
+        //take loan & update acc
         acc.outstanding_loans_usdnear+=usdnear_amount.0;
         self.internal_update_account(&env::predecessor_account_id(), &acc);
+        //get current balance
+        let usdnear_balance = self.usdnear_balances.get(&env::predecessor_account_id()).unwrap_or_default();
+        //add newly minted usdenars
+        self.usdnear_balances.insert(&env::predecessor_account_id(), &(usdnear_balance+usdnear_amount.0));
+        //add also to contract total
+        self.total_usdnear+=usdnear_amount.0;
     }
 
     pub fn repay_loan(&mut self, usdnear_amount:U128String) {
