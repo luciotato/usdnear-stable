@@ -63,8 +63,6 @@ pub struct BorrowingAccount {
     /// Because the amount of stNEAR naturally increases with epoch rewards, each acc has an amount of "shares" to be converted to a stNEAR amount on demand
     /// shares * share_price = amount of stNEARs
     collateral_shares: u128,
-    ///shares locked from borrowing
-    locked_collateral_shares: u128, 
     ///amount of usdnear owed
     outstanding_loans_usdnear: u128, 
     //-- STBL
@@ -78,7 +76,6 @@ impl Default for BorrowingAccount {
     fn default() -> Self {
         Self {
             collateral_shares: 0,
-            locked_collateral_shares:0,
             outstanding_loans_usdnear:0,
             stbl: 0,
         }
@@ -90,9 +87,25 @@ impl BorrowingAccount {
     fn is_empty(&self) -> bool {
         return self.collateral_shares == 0
             && self.stbl == 0
-            && self.locked_collateral_shares == 0
             && self.outstanding_loans_usdnear == 0
             ;
+    }
+
+    fn get_current_credit_limit(&self, main:&UsdNearStableCoin) -> u128 {
+        let stnear = main.amount_from_collateral_shares(self.collateral_shares);
+        let max_usd = stnear * main.current_stnear_price;
+        return max_usd.saturating_sub(self.outstanding_loans_usdnear);
+    }
+
+    /// returns basis points
+    /// if collateral ratio >999%, returns 999%
+    fn get_current_collateralization_ratio(&self, main:&UsdNearStableCoin) -> u32 {
+        const MAX:u32 = 999*PERCENT_BP;
+        if self.outstanding_loans_usdnear==0 {return MAX}; 
+        let collateral_value = main.amount_from_collateral_shares(self.collateral_shares) * main.current_stnear_price;
+        let result = collateral_value * 10000 / self.outstanding_loans_usdnear;
+        if result>MAX as u128 {return MAX}; 
+        return result as u32;
     }
 }
 
@@ -199,8 +212,8 @@ impl UsdNearStableCoin {
         };
     }
 
-    /// ---Indirect DEPOSIT--- (NEP-141 fungible token standard)
-    /// To "deposit" some stNEAR the web app must call META_POOL_STNEAR_CONTRACT.ft_transfer_call("usdnear.stable.testnet", [amount])
+    /// ---Indirect DEPOSIT/ADD COLLATERAL--- (NEP-141 fungible token standard)
+    /// To "deposit some stNEAR"/"add collateral" the web app must call META_POOL_STNEAR_CONTRACT.ft_transfer_call("usdnear.stable.testnet", [amount])
     /// the amount is transferred and then the META_POOL_STNEAR_CONTRACT will call this fn ft_on_transfer
     pub fn ft_on_transfer(
         &mut self,
@@ -216,9 +229,36 @@ impl UsdNearStableCoin {
         return 0;
     }
 
-    /// Withdraws stNEAR from this contract to the user's META_POOL_STNEAR_CONTRACT account
-    pub fn withdraw(&mut self, amount: U128String) {
+    /// Withdraws collateral(stNEAR) from this contract to the user's META_POOL_STNEAR_CONTRACT account
+    pub fn withdraw_stnear(&mut self, amount: U128String) {
         self.internal_withdraw_stnear(amount.into());
+    }
+
+    pub fn take_loan(&mut self, usdnear_amount:U128String) {
+        let mut acc = self.internal_get_account(&env::predecessor_account_id());
+        let limit = acc.get_current_credit_limit(&self);
+        assert!(usdnear_amount.0<=limit,"You can only take USDNEAR {} as loan. Add more collateral to extend your credit",limit);
+        acc.outstanding_loans_usdnear+=usdnear_amount.0;
+        self.internal_update_account(&env::predecessor_account_id(), &acc);
+    }
+
+    pub fn repay_loan(&mut self, usdnear_amount:U128String) {
+        //get account
+        let mut acc = self.internal_get_account(&env::predecessor_account_id());
+        // do the user owe usdnear?
+        assert!(acc.outstanding_loans_usdnear>0,"You owe no USDNEAR");
+        // max to repay is what they owe
+        let to_repay = if usdnear_amount.0 > acc.outstanding_loans_usdnear {acc.outstanding_loans_usdnear} else {usdnear_amount.0};
+        // get usdnear balance for this user
+        let usdnear_balance = self.usdnear_balances.get(&env::predecessor_account_id()).unwrap_or_default();
+        // can't use what they don't have
+        assert!(usdnear_balance>=to_repay,"You have USDNEAR {}. You can not repay {}",usdnear_balance,to_repay);
+        // repay & save acc
+        acc.outstanding_loans_usdnear-=to_repay;
+        self.internal_update_account(&env::predecessor_account_id(), &acc);
+        // burn usdnear for the user & the contract
+        self.usdnear_balances.insert(&env::predecessor_account_id(), &(usdnear_balance-to_repay));
+        self.total_usdnear-=to_repay;
     }
 
 }
