@@ -18,14 +18,12 @@ use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 
 pub use crate::internal::*;
 pub use crate::owner::*;
-pub use crate::getters::*;
 pub use crate::types::*;
 pub use crate::utils::*;
 
 pub mod gas;
 pub mod types;
 pub mod utils;
-pub mod getters;
 pub mod internal;
 pub mod owner;
 pub mod persistent_map;
@@ -51,6 +49,14 @@ pub trait OwnerCallbacks {
         &mut self,
         account_id: String,
         amount: u128,
+    );
+
+    fn after_transfer_stnear_plus_fee_to_liquidator(
+        &self,
+        loan_account_id:AccountId,
+        usdnear_repay:u128,
+        liquidator_id:AccountId,
+        stnear_to_receive:u128
     );
 }
 
@@ -172,6 +178,8 @@ pub struct UsdNearStableCoin {
 
     ///annual percentage rate for outstandig loans
     pub usdnear_apr_basis_points: u16, //250 => 2.5%
+    ///liquidation fee. % the liquidator earns to restore overcollateralization
+    pub liquidaton_fee_basis_points: u16, // default 500 => 5%
 
     /// Operator account ID (who's in charge of the price oracle)
     pub operator_account_id: String,
@@ -222,10 +230,11 @@ impl UsdNearStableCoin {
             current_stnear_price: current_stnear_price.0,
             collateral_basis_points: 200*PERCENT_BP,
             min_collateral_basis_points: 150*PERCENT_BP,
+            usdnear_apr_basis_points: 250,   //2.5%
+            liquidaton_fee_basis_points: 500, //5%
             min_account_balance: NEAR,
             web_app_url: Some(String::from(DEFAULT_WEB_APP_URL)),
             auditor_account_id: Some(String::from(DEFAULT_AUDITOR_ACCOUNT_ID)),
-            usdnear_apr_basis_points: 250,   //2.5%
             operator_fee_basis_points: 3000, //30% from 2.5%
             treasury_fee_basis_points: 7000, //70% from 2.5%
             borrowing_paused: false,  
@@ -307,5 +316,135 @@ impl UsdNearStableCoin {
         self.usdnear_balances.insert(&env::predecessor_account_id(), &(usdnear_balance-to_repay));
         self.total_usdnear-=to_repay;
     }
+
+    pub fn liquidate(&mut self, loan_account_id:String) {
+
+        let liquidator_id = env::predecessor_account_id();
+
+        if self.busy_accounts.contains(&loan_account_id) {
+            panic!("loan_account is busy");
+        }
+        if self.busy_accounts.contains(&liquidator_id) {
+            panic!("your account is busy");
+        }
+
+        //get loan account 
+        let loan_acc = self.internal_get_account(&loan_account_id);
+        // do the loan_acc owe usdnear?
+        assert!(loan_acc.outstanding_loans_usdnear>0,"no USDNEAR owed");
+        // check collateralization
+        let rate = loan_acc.get_current_collateralization_ratio(self);
+        assert!(rate < self.min_collateral_basis_points, "coll.rate.BP is {}. Can't liquidate",rate);
+        // compute usdnear to repay in order to to restore collatellar rate
+        let all_collateral_stnear = self.amount_from_collateral_shares(loan_acc.collateral_shares);
+        let required_collateral_usd = apply_pct(self.collateral_basis_points, loan_acc.outstanding_loans_usdnear);
+        let valued_collateral_usd = loan_acc.valued_collateral_usd(self);
+        let liq_fee_plus_100:u32 = 10000+self.liquidaton_fee_basis_points as u32;
+        //cross-check, shouldn't happen at this point
+        assert!(valued_collateral_usd < required_collateral_usd, "ERR: valued.collat {} >= req.coll {}",valued_collateral_usd,required_collateral_usd);
+        let usdnear_repay: u128;
+        let stnear_to_receive: u128;
+        let shares_to_receive: u128;
+        if valued_collateral_usd < loan_acc.outstanding_loans_usdnear { 
+            //catasthrophic. underwater loan. It's the responsibility of the liquidator to check this condition before this call
+            //at this point we accept the liquidation even if at face value is not benefical to the liquidator
+            usdnear_repay = loan_acc.outstanding_loans_usdnear;
+            stnear_to_receive = all_collateral_stnear;
+            shares_to_receive = loan_acc.collateral_shares;
+        }
+        else {
+            //some room for a liquidation fee
+            //compute exact usdnear amount 
+            usdnear_repay = (U256::from(required_collateral_usd - valued_collateral_usd) * U256::from(10000) / 
+                    U256::from(self.collateral_basis_points - liq_fee_plus_100)).as_u128();
+            //stnear_to_receive should be usdnear*(1+fee%) worth of stnear, with a hard limit at all_collateral_stnear
+            stnear_to_receive = std::cmp::min(all_collateral_stnear,self.usdnear_to_stnear(apply_pct(liq_fee_plus_100, usdnear_repay)));
+            shares_to_receive = std::cmp::min(loan_acc.collateral_shares,self.collateral_shares_from_amount(stnear_to_receive));
+        }        
+
+        // get usdnear balance for the liquidator
+        let liquidator_usdnear_balance = self.usdnear_balances.get(&liquidator_id).unwrap_or_default();
+        assert!(liquidator_usdnear_balance>=usdnear_repay,"not enough USDNEAR to repay loan. you need {}",usdnear_repay);
+
+        //liquidator must also have a borrowingAccount here, with a min stNEAR balance
+        let liquidator_acc = self.internal_get_account(&liquidator_id);
+        assert!(self.amount_from_collateral_shares(liquidator_acc.collateral_shares) >= MIN_STNEAR_BALANCE_FOR_LIQUIDATORS,
+            "To be a liquidator you need to have a borrowing account with at least stNEAR {}",MIN_STNEAR_BALANCE_FOR_LIQUIDATORS);
+
+        //ok the liquidation can proceed
+        //transfer stnear form the collateral to the liquidator
+
+        //mark acc as busy - block reentry
+        self.busy_accounts.insert(&loan_account_id);
+        self.busy_accounts.insert(&liquidator_id);
+
+        //launch async to trasnfer stNEAR+fee to liquidator
+        ext_meta_pool::ft_transfer(
+            liquidator_id.clone(),
+            stnear_to_receive.into(),
+            String::from(""), //memo
+            //------------
+            &META_POOL_STNEAR_CONTRACT,
+            NO_DEPOSIT,
+            gas::TRANSFER_STNEAR,
+        )
+        .then(ext_self_owner::after_transfer_stnear_plus_fee_to_liquidator( //after transfer callback here
+            loan_account_id,
+            usdnear_repay,
+            liquidator_id,
+            shares_to_receive,
+            //------------
+            &env::current_account_id(),
+            NO_DEPOSIT,
+            gas::AFTER_TRANSFER_STNEAR,
+        ));
+    }
+
+    //prev fn continues here
+    /// Called after transfer stNear+fee to the liquidator
+    pub fn after_transfer_stnear_plus_fee_to_liquidator(
+        &mut self,
+        loan_account_id:AccountId,
+        usdnear_repay:u128,
+        liquidator_id:AccountId,
+        collateral_shares_plus_fee:u128) 
+    {
+
+        assert_callback_calling();
+        if is_promise_success() {
+            //stNEAR transfer completed ok
+
+            // get liquidator usdnear balance, remove usdnear amount to repay
+            let liquidator_usdnear_balance = self.usdnear_balances.get(&liquidator_id).unwrap_or_default();
+            assert!(liquidator_usdnear_balance>=usdnear_repay);
+            //remove usdnear amount used to repay
+            self.usdnear_balances.insert(&env::predecessor_account_id(), &(liquidator_usdnear_balance-usdnear_repay));
+
+            //get loan account 
+            //repay loan with liquidator usdnear (burn), remove stnear to pay the liquidator & save acc
+            let mut loan_acc = self.internal_get_account(&loan_account_id);
+            assert!(loan_acc.outstanding_loans_usdnear>=usdnear_repay);
+            // repay loan with liquidator usdnear (burn usdnear)
+            loan_acc.outstanding_loans_usdnear-=usdnear_repay;
+            self.total_usdnear-=usdnear_repay;
+            // remove stnear for liquidator
+            assert!(loan_acc.collateral_shares>=collateral_shares_plus_fee);
+            loan_acc.collateral_shares-=collateral_shares_plus_fee;
+            // save loan acc
+            self.internal_update_account(&loan_account_id, &loan_acc);
+
+            //get liquidator account 
+            // store stnear (register trasnfer)
+            let mut liquidator_acc = self.internal_get_account(&liquidator_id);
+            liquidator_acc.collateral_shares+=collateral_shares_plus_fee;
+            // save liquidator acc
+            self.internal_update_account(&liquidator_id, &liquidator_acc);
+
+        }
+        //remove busy marks
+        self.busy_accounts.remove(&loan_account_id);
+        self.busy_accounts.remove(&liquidator_id);
+    }
+
 
 }

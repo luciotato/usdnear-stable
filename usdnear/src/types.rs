@@ -14,6 +14,10 @@ pub const FIVE_NEAR: u128 = 5 * NEAR;
 pub const TEN_NEAR: u128 = 10 * NEAR;
 pub const NEAR_1K: u128 = 1_000 * NEAR;
 
+
+///To be a liquidator you need to have a borrowing account with at least MIN_STNEAR_BALANCE_FOR_LIQUIDATORS
+pub const MIN_STNEAR_BALANCE_FOR_LIQUIDATORS:u128 = 100*NEAR;
+
 pub const PERCENT_BP: u32 = 100; //amount to multyply a percentage to convert to basis points. e.g. 2.5*PERCENT_BP = 250 = 2.5%
 
 pub const DEVELOPERS_ACCOUNT_ID: &str = "developers.near"; 

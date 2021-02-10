@@ -54,6 +54,7 @@ impl UsdNearStableCoin {
             { stnear_available } 
         else  { stnear_amount_requested };
 
+        //mark acc as busy - block reentry
         self.busy_accounts.insert(&account_id);
 
         //launch async to trasnfer stNEAR from this contract to the user
