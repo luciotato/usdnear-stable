@@ -21,10 +21,20 @@ pub fn assert_one_yocto(){
 #[near_bindgen]
 impl UsdNearStableCoin {
 
+    /// Returns the total supply of the token.
+    pub fn ft_total_supply(&self) -> U128String {
+        return self.total_usdnear.into()
+    }
+
+    /// Returns the balance of the given account ID. Returns `0` balance, if the account doesn't exist.
+    pub fn ft_balance_of(&self, account_id: AccountId) -> U128String {
+        return self.usdnear_balances.get(&account_id).unwrap_or_default().into()
+    }
+
     /// Transfer `amount` of tokens from the caller (`predecessor_id`) to `receiver_id`.
     /// Requirements:
     #[payable]
-    pub fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128String, _msg:String, _memo:String){
+    pub fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128String, #[allow(unused_variables)] msg:String, #[allow(unused_variables)] memo:String){
 
         //block function-call keys
         assert_one_yocto();
@@ -38,7 +48,7 @@ impl UsdNearStableCoin {
     /// * receiver_id must be a contract and must respond to `ft_on_transfer(&mut self, sender_id: AccountId, amount: U128String, _msg: String ) -> u128`
     /// * if receiver_id is not a contract or `ft_on_transfer` fails, the transfer is rolled-back
     #[payable]
-    pub fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128String, msg:String, _memo:String){
+    pub fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128String, msg:String, #[allow(unused_variables)] memo:String){
 
         //block function-call keys
         assert_one_yocto();

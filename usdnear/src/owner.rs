@@ -53,6 +53,7 @@ impl UsdNearStableCoin {
             stnear: stnear.into(),
             stnear_price_usd: self.current_stnear_price.into(),
             stbl: acc.stbl.into(),
+            usdnear_credit_limit: acc.get_current_credit_limit(self).into(),
             outstanding_loans_usdnear: acc.outstanding_loans_usdnear.into(),
             locked_stnear: acc.locked_collateral_stnear(&self).into(),
             collateralization_ratio: acc.get_current_collateralization_ratio(&self),
@@ -103,10 +104,11 @@ impl UsdNearStableCoin {
         return GetContractStateResult {
             total_usdnear: self.total_usdnear.into(),
             total_collateral_stnear: self.total_collateral_stnear.into(),
+            current_stnear_price: self.current_stnear_price.into(),
+            valued_collateral: self.stnear_to_usd(self.total_collateral_stnear).into(),
             total_stbl: self.total_stbl.into(),
             balances_count: self.usdnear_balances.len().into(),
             b_accounts_count: self.b_accounts.len().into(),
-            current_stnear_price: self.current_stnear_price.into(),
             total_collateral_shares: self.total_collateral_shares.into(),
             usdnear_apr_basis_points: self.usdnear_apr_basis_points,
         };
@@ -161,7 +163,11 @@ impl UsdNearStableCoin {
         self.current_stnear_price = stnear_price_usd.0;
     }
     
-    
+    pub fn clear_busy_flag(&mut self) {
+        self.assert_owner_calling();
+        self.busy= false;
+    }
+
     /// compute rewards and interest
     //------------------------------------------------
     //-- COMPUTE STAKING REWARDS and collect interest

@@ -68,6 +68,7 @@ pub struct GetAccountInfoResult {
     pub usdnear: U128,
     pub stnear: U128,
     pub stnear_price_usd: U128,
+    pub usdnear_credit_limit: U128,
     pub locked_stnear: U128,
     pub outstanding_loans_usdnear: U128,
     pub collateralization_ratio: u32, //basis points, max 999%
@@ -83,6 +84,7 @@ pub struct GetContractStateResult {
     pub total_usdnear: U128,
     pub total_collateral_stnear: U128,
     pub current_stnear_price: U128,
+    pub valued_collateral: U128,
     /// total stbl minted
     pub total_stbl: U128, 
     //how many usdnear balances there are

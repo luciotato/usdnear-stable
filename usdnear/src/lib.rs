@@ -40,7 +40,7 @@ pub const NSLP_INTERNAL_ACCOUNT: &str = "..NSLP..";
 #[ext_contract(ext_meta_pool)]
 pub trait ExtMetaPoolContract {
     fn get_account_total_balance(&self, account_id: AccountId) -> U128String;
-    fn ft_transfer(account_id: AccountId, amount_to_transfer: U128String, memo:String);
+    fn ft_transfer(receiver_id: AccountId, amount: U128String, memo:String);
 }
 
 // callbacks here defined as traits to make it easy to create the promise
@@ -48,9 +48,9 @@ pub trait ExtMetaPoolContract {
 pub trait SelfCallbacks {
 
     fn after_transfer_stnear_to_user(
-        &mut self,
+        &self,
         account_id: String,
-        amount: u128,
+        amount: U128String,
     );
 
     fn after_transfer_stnear_plus_fee_to_liquidator(
@@ -269,16 +269,6 @@ impl UsdNearStableCoin {
         };
     }
 
-    //applies current_price to a stNEAR amount to get a USD valuation
-    fn stnear_to_usd(&self, stnear:u128) -> u128 {
-        return (U256::from(stnear) * U256::from(self.current_stnear_price) / U256::from(NEAR)).as_u128();
-    }
-
-    //applies current_price to convert from USDNEAR to stNEAR (collateral)
-    fn usdnear_to_stnear(&self, usdnear:u128) -> u128 {
-        return (U256::from(usdnear) * U256::from(NEAR) / U256::from(self.current_stnear_price)).as_u128();
-    }
-    
     /// ---Indirect DEPOSIT/ADD stNEAR COLLATERAL--- (stNEAR is a NEP-141 fungible token standard)
     /// To "deposit some stNEAR"/"add collateral" the web app must call META_POOL_STNEAR_CONTRACT.ft_transfer_call("usdnear.stable.testnet", [amount])
     /// the amount is transferred and then the META_POOL_STNEAR_CONTRACT will call this fn ft_on_transfer
@@ -293,8 +283,67 @@ impl UsdNearStableCoin {
 
     /// Withdraws collateral(stNEAR) from this contract to the user's META_POOL_STNEAR_CONTRACT account
     pub fn withdraw_stnear(&mut self, amount: U128String) {
-        self.internal_withdraw_stnear(amount.into());
+        
+        self.assert_not_busy();
+
+        let account_id = env::predecessor_account_id();
+        let acc = self.internal_get_account(&account_id);
+
+        let total_stnear = self.amount_from_collateral_shares(acc.collateral_shares);
+        let locked_stnear = acc.locked_collateral_stnear(self);
+        let stnear_available = total_stnear.saturating_sub(locked_stnear);
+
+        assert!(
+            stnear_available >= amount.0,
+            "Not enough stNEAR balance to withdraw the requested amount. You have stNEAR {} total, {} locked and {} available", 
+            total_stnear, locked_stnear, stnear_available 
+        );
+
+        let amount_to_transfer  = 
+            if stnear_available - amount.0 < ONE_NEAR_CENT/2  //small yotctos remain, withdraw all
+                { stnear_available } 
+            else 
+                { amount.0 };
+
+        //mark as busy - block reentry
+        self.busy = true;
+
+        //launch async to trasnfer stNEAR from this contract to the user
+        ext_meta_pool::ft_transfer(
+            account_id.clone(),
+            amount_to_transfer.into(),
+            String::from(""), //memo
+            //------------
+            &META_POOL_STNEAR_CONTRACT,
+            NO_DEPOSIT,
+            gas::TRANSFER_STNEAR,
+        )
+        .then(ext_self_callback::after_transfer_stnear_to_user( //after transfer callback here
+            account_id,
+            amount_to_transfer.into(),
+            //------------
+            &env::current_account_id(),
+            NO_DEPOSIT,
+            gas::AFTER_TRANSFER_STNEAR,
+        ));
     }
+    //prev fn continues here
+    // Called after transfer stNear to the user
+    //must not panic
+    pub fn after_transfer_stnear_to_user(
+        &mut self,
+        account_id: String,
+        amount: U128String,
+    ) {
+        assert_callback_calling();
+        self.busy= false;
+        //debug!("after_transfer {} {} {}",is_promise_success(),account_id,amount.0);
+        if is_promise_success() {
+            //the stNEAR withdrawal was successful
+            self.remove_amount_and_shares_preserve_share_price(&account_id,amount.0);
+        }
+    }
+
 
     pub fn take_loan(&mut self, usdnear_amount:U128String) {
         assert!(usdnear_amount.0>=1*NEAR,"min loan is 1 USDNEAR");
@@ -337,9 +386,11 @@ impl UsdNearStableCoin {
     /// predecesor_account_id can try to liquidate X amount
     /// in order to move collateral ratio back to self.collateral_basis_points
     /// 
-    pub fn liquidate(&mut self, loan_account_id:String) {
+    pub fn liquidate(&mut self, loan_account_id:String, max_usdnear_buy:U128String) {
 
         self.assert_not_busy();
+
+        assert!(max_usdnear_buy.0 >= TEN_NEAR, "minimun amount to buy is USDNEAR 10");
 
         let liquidator_id = env::predecessor_account_id();
 
@@ -362,23 +413,21 @@ impl UsdNearStableCoin {
         let liq_fee_plus_100:u32 = 10000+self.liquidaton_fee_basis_points as u32;
         //cross-check, shouldn't happen at this point
         assert!(valued_collateral_usd < required_collateral_usd, "ERR: valued.collat {} >= req.coll {}",valued_collateral_usd,required_collateral_usd);
-        let usdnear_repay: u128;
-        let collateral_shares_plus_fee: u128;
+        let max_usdnear_repay: u128;
         if valued_collateral_usd < loan_acc.outstanding_loans_usdnear { 
             //catasthrophic. underwater loan. It's the responsibility of the liquidator to check this condition before this call
             //at this point we accept the liquidation even if at face value is not benefical to the liquidator
-            usdnear_repay = loan_acc.outstanding_loans_usdnear;
-            collateral_shares_plus_fee = loan_acc.collateral_shares;
+            max_usdnear_repay = loan_acc.outstanding_loans_usdnear;
         }
         else {
             //some room for a liquidation fee
             //compute exact usdnear amount 
-            usdnear_repay = (U256::from(required_collateral_usd - valued_collateral_usd) * U256::from(10000) / 
+            max_usdnear_repay = (U256::from(required_collateral_usd - valued_collateral_usd) * U256::from(10000) / 
                     U256::from(self.collateral_basis_points - liq_fee_plus_100)).as_u128();
-            //stnear_to_receive should be usdnear*(1+fee%) worth of stnear, with a hard limit set at all_collateral_stnear
-            let stnear_to_receive = std::cmp::min(all_collateral_stnear,self.usdnear_to_stnear(apply_pct(liq_fee_plus_100, usdnear_repay)));
-            collateral_shares_plus_fee = std::cmp::min(loan_acc.collateral_shares,self.collateral_shares_from_amount(stnear_to_receive));
         }        
+
+        //the amount to repay is limited to the amount the liquidator indicated as max
+        let usdnear_repay = std::cmp::min(max_usdnear_repay, max_usdnear_buy.0);
 
         // get liquidator's usdnear balance
         let liquidator_usdnear_balance = self.usdnear_balances.get(&liquidator_id).unwrap_or_default();
@@ -391,6 +440,10 @@ impl UsdNearStableCoin {
         // repay loan with liquidator's usdnear (burn usdnear)
         loan_acc.outstanding_loans_usdnear-=usdnear_repay;
         self.total_usdnear-=usdnear_repay;
+
+        //stnear_to_receive should be usdnear*(1+fee%) worth of stnear, with a hard limit set at all_collateral_stnear
+        let stnear_to_receive = std::cmp::min(all_collateral_stnear, self.usdnear_to_stnear(apply_pct(liq_fee_plus_100, usdnear_repay)));
+        let collateral_shares_plus_fee = std::cmp::min(loan_acc.collateral_shares, self.collateral_shares_from_amount(stnear_to_receive));
 
         // move collateral stnear from loan_acc.collateral to liquidator
         loan_acc.collateral_shares-=collateral_shares_plus_fee;

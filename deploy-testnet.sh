@@ -5,7 +5,7 @@ OPERATOR=$OWNER
 MASTER_ACC=stable.$NETWORK
 CONTRACT_ACC=usdnear.$MASTER_ACC
 
-stbl --cliconf -c $CONTRACT_ACC -acc $OWNER
+usdnear --cliconf -c $CONTRACT_ACC -acc $OWNER
 
 export NODE_ENV=$NETWORK
 
@@ -14,11 +14,15 @@ export NODE_ENV=$NETWORK
 #read input
 #near delete $CONTRACT_ACC $MASTER_ACC
 #near create-account $CONTRACT_ACC --masterAccount $MASTER_ACC
-#stbl deploy ./res/divpool.wasm
-#stbl new { owner_account_id:$OWNER, treasury_account_id:treasury.$CONTRACT_ACC, operator_account_id:$OPERATOR } --accountId $MASTER_ACC
+#usdnear deploy ./res/usdnear.wasm  --accountId $MASTER_ACC
+#near call $CONTRACT_ACC new "{\"owner_account_id\":\"$OWNER\", \"treasury_account_id\":\"treasury.$CONTRACT_ACC\", \"operator_account_id\":\"$OPERATOR\",\"current_stnear_price\":\"3310000000000000000000000\"}" --accountId $MASTER_ACC
 ## set params@stbl set_params
-#stbl default_pools_testnet
+#usdnear set_params
+#usdnear set_price 3.31
 
 ## redeploy code only
-stbl deploy ./res/usdnear.wasm  --accountId $MASTER_ACC
+usdnear deploy ./res/usdnear.wasm  --accountId $MASTER_ACC
 
+#save last deployment  (to being able to recover state/tokens)
+cp ./res/usdnear.wasm ./res/usdnear.`date +%F.%T`.wasm
+date +%F.%T

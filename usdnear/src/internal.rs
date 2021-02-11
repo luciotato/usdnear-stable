@@ -4,7 +4,7 @@ pub use crate::types::*;
 pub use crate::utils::*;
 
 pub fn assert_min_amount(amount: u128) {
-    assert!(amount >= FIVE_NEAR, "minimun amount is 5N");
+    assert!(amount >= FIVE_NEAR, "minimun amount is 5");
 }
 
 /****************************/
@@ -23,66 +23,16 @@ impl UsdNearStableCoin {
     }
 
 
-    //------------------------------
-    pub(crate) fn internal_withdraw_stnear(&mut self, stnear_amount_requested: u128) {
-        
-        self.assert_not_busy();
-
-        let account_id = env::predecessor_account_id();
-        let acc = self.internal_get_account(&account_id);
-
-        let total_stnear = self.amount_from_collateral_shares(acc.collateral_shares);
-        let locked_stnear = acc.locked_collateral_stnear(self);
-        let stnear_available = total_stnear.saturating_sub(locked_stnear);
-
-        assert!(
-            stnear_available >= stnear_amount_requested,
-            "Not enough stNEAR balance to withdraw the requested amount. You have stNEAR {} total, {} locked and {} available", 
-            total_stnear, locked_stnear, stnear_available 
-        );
-
-        let amount_to_transfer  = 
-        if stnear_available - stnear_amount_requested < ONE_NEAR_CENT/2  //small yotctos remain, withdraw all
-            { stnear_available } 
-        else  { stnear_amount_requested };
-
-        //mark as busy - block reentry
-        self.busy = true;
-
-        //launch async to trasnfer stNEAR from this contract to the user
-        ext_meta_pool::ft_transfer(
-            account_id.clone(),
-            amount_to_transfer.into(),
-            String::from(""), //memo
-            //------------
-            &META_POOL_STNEAR_CONTRACT,
-            NO_DEPOSIT,
-            gas::TRANSFER_STNEAR,
-        )
-        .then(ext_self_callback::after_transfer_stnear_to_user( //after transfer callback here
-            account_id,
-            amount_to_transfer,
-            //------------
-            &env::current_account_id(),
-            NO_DEPOSIT,
-            gas::AFTER_TRANSFER_STNEAR,
-        ));
-    }
-    //prev fn continues here
-    /// Called after transfer stNear to the user
-    pub fn after_transfer_stnear_to_user(
-        &mut self,
-        account_id: String,
-        amount: u128,
-    ) {
-        assert_callback_calling();
-        self.busy= false;
-        if is_promise_success() {
-            //the stNEAR withdrawal was successful
-            self.remove_amount_and_shares_preserve_share_price(&account_id,amount);
-        }
+    //applies current_price to a stNEAR amount to get a USD valuation
+    pub(crate) fn stnear_to_usd(&self, stnear:u128) -> u128 {
+        return (U256::from(stnear) * U256::from(self.current_stnear_price) / U256::from(NEAR)).as_u128();
     }
 
+    //applies current_price to convert from USDNEAR to stNEAR (collateral)
+    pub(crate) fn usdnear_to_stnear(&self, usdnear:u128) -> u128 {
+        return (U256::from(usdnear) * U256::from(NEAR) / U256::from(self.current_stnear_price)).as_u128();
+    }
+    
 
     //internal fn MUST not panic
     pub(crate) fn remove_amount_and_shares_preserve_share_price(
