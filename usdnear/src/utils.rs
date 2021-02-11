@@ -13,6 +13,7 @@ macro_rules! log {
         env::log(format!($($arg)*).as_bytes());
     });
 }
+
 pub const MIN_BALANCE_FOR_STORAGE:u128 = 5*NEAR;
 pub fn assert_min_balance(amount:u128){
     assert!(amount > 0, "Amount should be positive");
@@ -21,7 +22,6 @@ pub fn assert_min_balance(amount:u128){
         "The contract account balance can't go lower than MIN_BALANCE"
     );
 }
-
 
 pub fn assert_callback_calling() {
     assert_eq!(env::predecessor_account_id(), env::current_account_id());

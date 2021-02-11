@@ -14,8 +14,10 @@ The total supply of stablecoins increases as a new loan is issued, and decreases
 
 ### Interest
 
-The interest on the issued USDNEAR will be computed as to be 2.5% Effective Annual Interest Rate, and collected on each epoch in the same process of computing staking rewards.
-Considering that staked NEAR receive staking rewards each epoch (every 12hs) the collateral will tend to naturally increase in value. The APY for staked near is around 10% now (Feb-2021), so initially the rewards will be more than enough to cover the interest on the loans.
+The interest on the issued USDNEAR will be collected on each epoch in the same process of computing staking rewards.
+Considering that staked NEAR receive staking rewards each epoch (every 12hs) the collateral naturally increase in value every 12hs. 
+The APY for staked near is around 10% now (Feb-2021), so initially the rewards will be more than enough to cover the initial 2.5% APR on USDNEAR loans.
+The 2.5% APR is taken proportionally from rewards on each epoch, so if the amount of rewards goes down the APR will go down too, so 2.5% APR is configurable target and not an exact figure. Effective APR can be lower.
 
 ### Collateral Price Oracle
 
@@ -23,7 +25,7 @@ Collateralization levels are determined by using price data reported by an oracl
 
 ### Conversion Window
 
-Any USDNEAR token owner can convert their token into stNEAR. The amount of stNEAR the user receives is computed from the market price of NEAR so the conversion is always "1 USDNEAR" = "1 USD worth of stNEAR". The conversion window transfer the amount of stNEAR from the collateral pool to the user, and receives and burns USDNEAR. Since USDNEAR is burned, the total Overcollateralization ratio remains the same.  This conversion mechanism does not change any of the existing loans. The users with outstanding loans still need to repay their loans in order to free their collateral.
+Any USDNEAR token owner can convert their token into stNEAR. The amount of stNEAR the user receives is computed from the market price of NEAR so the conversion is always "1 USDNEAR" = "1 USD worth of stNEAR". The conversion window transfers the amount of stNEAR from the collateral pool to the user, and receives and burns USDNEAR. Since USDNEAR is burned, the total Overcollateralization ratio remains the same.  This conversion mechanism does not change any of the existing loans. The users with outstanding loans still need to repay their loans in order to free their collateral.
 
 The existence of a conversion fixed-rate window where "1 USDNEAR" = "1 USD worth of stNEAR", guarantees the stability of USDNEAR. The overcollateralization guarantees conversion availability, protecting USDNEAR holders form the collateral asset (stNEAR) price volatility.
 
@@ -41,14 +43,14 @@ Liquidators must have their own mechanism to identify "open for liquidation" loa
 
 ## Use Cases
 
-Alice can have an account where she can deposit collateral stNEAR. 
-Some minimun NEAR deposit may be required to open the account (to back-up account storage) if that storage is not provided by the operator.
+Alice creates an account when she deposits collateral stNEAR into the contract. 
+(Normally some NEAR is required to back-up account storage, but that NEAR is provided by the operator or the treasury. NEAR per storage price is being lowered to 1N per 10Kib).
 
-Once Alice deposits the collateral, a "credit limit" is computed according to the current NEAR price and the collateralization ratio. e.g. if Alice deposited stNEAR 100, and the NEAR price is USD 2.5, then the collateral value is USD 250. If the collateralization ratio is 200% it means Alice will have a "line of credit" to borrow USDNEAR 125 backed by her USD 250 valued collateral.
+Once Alice deposits the collateral, a "credit limit" is computed according to the current stNEAR price and the collateralization ratio. e.g. if Alice deposited stNEAR 100, and the stNEAR price is USD 2.5, then the collateral value is USD 250. If the collateralization ratio is 200% it means Alice will have a "line of credit" to borrow USDNEAR 125 backed by her USD 250 valued collateral.
 
 Alice account now reads:
 - Tokens
-  - USDNEAR: 0
+  - USDNEAR: 0 
 - Line of Credit
   - USDNEAR: 125 [Take Loan]
 - Collateral
@@ -58,7 +60,7 @@ Alice account now reads:
   - owed: USDNEAR 0
 
 
-If Alice chooses to borrow USDNEAR 100, USDNEAR 100 are minted into Alice's account, and USD 200 value of collateral is locked and trasnferred to the collateral pool. The global amount of minted USDNEAR will be increased by 100 and the value of the collateral pool will be incresed by stNEAR valued USD 200, keeping the global overcollateralization constant.
+If Alice chooses to borrow USDNEAR 100, USDNEAR 100 are minted into Alice's account, and USD 200 value of collateral is locked. The global amount of minted USDNEAR will be increased by 100 and the value of the locked collateral will be incresed by 80 stNEAR valued USD 200, keeping the global overcollateralization constant.
 
 Alice account now reads:
 - Tokens  
@@ -91,6 +93,7 @@ and Alice account reads:
 - Outstanding Loans:  
   - owed: USDNEAR 100   [Repay]  
   - Collateralization Ratio: 200%  
+
 ### Liquidation Event
 
 Let's assume the NEAR price is now USD 1.4240. With this new price Alice's account reads:
@@ -107,6 +110,8 @@ Let's assume the NEAR price is now USD 1.4240. With this new price Alice's accou
   - owed: USDNEAR 100   [Repay]  
   - Collateralization Ratio: 142.4% **OPEN FOR LIQUIDATION** 
 
+Even using all Alice's collateal, the Collateralization Ratio is below 150%.
+
 At this point Alice's debt is open for liquidation because it's collateral is less than 150%. 
 
 A liquidator will be able to repay USDNEAR 64 from Alice's loan and will receive USD 70.4 worth of stNEAR from Alice's locked collateral (10% profit).
@@ -117,7 +122,7 @@ The amount a liquidator can repay is computed as:
 ```
 open_to_liquidate_USDNEAR = (collateral_value - 200% * owed) / (110% - 200%) 
 ```
- so after liquidation the Collateralization Ratio is back to 200% considering  a 10% liquidation fee.
+so after liquidation the Collateralization Ratio is back to 200% considering a 10% liquidation fee.
 
 After Liquidation, Alice's account reads:
 
@@ -142,13 +147,13 @@ After Liquidation, Alice's account reads:
 
 There are several functions for the operator to periodically call:
 
-### 1. set_reference_price()
+### 1. set_stnear_price_usd()
 
-Every hour, the contract operator computes the average NEAR price in USD from one or more exchange markets and send the information to the smart contract. That price determines the ratio of collateralization and the exchange rate for the conversion window.
+Every hour, the contract operator computes the average NEAR/stNEAR price in USD from one or more exchange markets and send the information to the smart contract. That price determines the ratio of collateralization and the exchange rate for the conversion window.
 
-###  2. compute_rewards()
+###  2. compute_rewards_and_interest()
 
-In the middle of each epoch, the contract operator calls this function to compute staking rewards from all the collateral. The rewards are added to the collateral pool, increasing the stNEAR amount and then collateralization for all users.
+Each epoch, the contract operator calls this function to compute staking rewards from all the collateral. The rewards are added to the collateral pool, increasing the stNEAR amount and then collateralization for all users.
 
 ###  3. collect_interest()
 

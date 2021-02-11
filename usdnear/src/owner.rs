@@ -1,4 +1,3 @@
-    /// OWNER'S METHOD & get info methods
 //
 // OWNER'S METHODS & GET info methods
 //
@@ -52,11 +51,26 @@ impl UsdNearStableCoin {
             account_id,
             usdnear: usdnear.into(),
             stnear: stnear.into(),
-            locked_stnear: acc.locked_collateral_stnear(&self).into(),
+            stnear_price_usd: self.current_stnear_price.into(),
             stbl: acc.stbl.into(),
             outstanding_loans_usdnear: acc.outstanding_loans_usdnear.into(),
+            locked_stnear: acc.locked_collateral_stnear(&self).into(),
             collateralization_ratio: acc.get_current_collateralization_ratio(&self),
         };
+    }
+
+    /// Returns the number of borrowing accounts 
+    pub fn get_number_of_accounts(&self) -> u64 {
+        return self.b_accounts.len();
+    }
+
+    /// Returns a partial list of borrowing accounts 
+    pub fn get_accounts(&self, from_index: u64, limit: u32) -> Vec<GetAccountInfoResult> {
+        assert!(limit<10000);
+        let keys = self.b_accounts.keys_as_vector();
+        return (from_index..std::cmp::min(from_index + limit as u64, keys.len()))
+            .map(|index| self.get_account_info(keys.get(index).unwrap()))
+            .collect();
     }
 
     /// NEP-129 get information about this contract
@@ -106,6 +120,7 @@ impl UsdNearStableCoin {
             borrowing_paused: self.borrowing_paused,
             min_account_balance: self.min_account_balance.into(),
             usdnear_apr_basis_points: self.usdnear_apr_basis_points,
+            epochs_per_year: self.epochs_per_year,
             operator_fee_basis_points: self.operator_fee_basis_points,
             treasury_fee_basis_points: self.treasury_fee_basis_points,
             };
@@ -130,10 +145,112 @@ impl UsdNearStableCoin {
         self.min_account_balance = params.min_account_balance.0;
 
         self.usdnear_apr_basis_points = params.usdnear_apr_basis_points;
+        self.epochs_per_year = params.epochs_per_year;
 
         assert!(params.operator_fee_basis_points+params.treasury_fee_basis_points==10000,"fee split must add 100%");
         self.operator_fee_basis_points = params.operator_fee_basis_points;
         self.treasury_fee_basis_points = params.treasury_fee_basis_points;
     }
+
+
+    /// Sets contract parameters 
+    pub fn set_stnear_price_usd(&mut self, stnear_price_usd:U128String) {
+        self.assert_owner_calling();
+        //allow 10% variation max
+        assert!(stnear_price_usd.0 * 9/10 < self.current_stnear_price && stnear_price_usd.0 * 11/10 > self.current_stnear_price );
+        self.current_stnear_price = stnear_price_usd.0;
+    }
     
+    
+    /// compute rewards and interest
+    //------------------------------------------------
+    //-- COMPUTE STAKING REWARDS and collect interest
+    //------------------------------------------------
+    // Operator method, but open to anyone. Should be called once per epoch
+    /// Retrieves actual balance from the stNEAR contract 
+    /// this fn queries the Meta-staking-pool contract (makes a cross-contract call)
+    pub fn compute_rewards_and_interest(&mut self) {
+
+        //Note: In order to make this contract independent from the operator
+        //this fn is open to be called by anyone
+        //self.assert_owner_calling();
+
+        self.assert_not_busy();
+
+        let epoch_height = env::epoch_height();
+        if self.last_rewards_epoch_height == epoch_height {
+            panic!("already run in this epoch");
+        }
+
+        self.busy=true;
+
+        //query our current balance (includes staking rewards)
+        ext_meta_pool::get_account_total_balance(
+            env::current_account_id(),
+            //promise params
+            &String::from(META_POOL_STNEAR_CONTRACT),
+            NO_DEPOSIT,
+            gas::GET_ACCOUNT_TOTAL_BALANCE,
+        )
+        .then(ext_self_callback::after_get_meta_contract_stnear_total_balance(
+            //promise params
+            &env::current_account_id(),
+            NO_DEPOSIT,
+            gas::AFTER_GET_ACCOUNT_TOTAL_BALANCE,
+        ));
+    }
+    /// prev fn continues here - must not panic
+    //-----------------------------------------
+    pub fn after_get_meta_contract_stnear_total_balance(
+        &mut self,
+        #[callback] total_balance: U128String,
+    ) {
+        //we enter here after asking the meta-staking-pool how much do we have staked (plus rewards)
+        //total_balance: U128String contains the answer from the meta-staking-pool
+
+        assert_callback_calling();
+        self.busy=false;
+
+        let new_staked_amount= total_balance.0;
+
+        let rewards: u128;
+        if new_staked_amount < self.total_collateral_stnear {
+            log!(
+                "INCONSISTENCY: meta-contract says total stNEAR {} < self.total_collateral_stnear {}",
+                new_staked_amount , self.total_collateral_stnear
+            );
+            rewards = 0;
+        } else {
+            //compute rewards, as new balance minus old balance
+            rewards = new_staked_amount - self.total_collateral_stnear;
+        }
+
+        log!(
+            "meta-contract says: old stNEAR:{} new:{} rewards:{}",
+            self.total_collateral_stnear, new_staked_amount, rewards
+        );
+
+        if rewards > 0 {
+            // compute interest on loans as a % of rewards
+            // initially loan interest is 2.5% APR. 
+            // NEAR staking rewards are about 10% APY (feb-2021), so a 25% of rewards approximates 2.5% APR
+            // The 25% has to be computed ONLY on 100% collateral, so is 2.5% APR over USDNEAR owed
+
+            let interest_year_usdnear = apply_pct(self.usdnear_apr_basis_points, self.total_usdnear);
+            let interest_epoch_usdnear = interest_year_usdnear / self.epochs_per_year as u128; //default 365*2, 2 epochs per day
+            let interest_epoch_stnear = self.usdnear_to_stnear(interest_epoch_usdnear);
+
+            //add interest stNEAR to treasury
+            &self.add_amount_and_shares_preserve_share_price(self.treasury_account_id.clone(),interest_epoch_stnear);
+            log!("treasury got {} as epoch interest",interest_epoch_stnear);
+            
+            // rest of staking rewards go into total_collateral increasing share value -> stNEAR amounts for everyone
+            self.total_collateral_stnear += rewards - interest_epoch_stnear; 
+
+            self.last_rewards_epoch_height = env::epoch_height();
+
+        }
+    }
+    
+
 }

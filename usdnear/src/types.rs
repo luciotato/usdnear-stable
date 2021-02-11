@@ -67,6 +67,7 @@ pub struct GetAccountInfoResult {
     pub account_id: AccountId,
     pub usdnear: U128,
     pub stnear: U128,
+    pub stnear_price_usd: U128,
     pub locked_stnear: U128,
     pub outstanding_loans_usdnear: U128,
     pub collateralization_ratio: u32, //basis points, max 999%
@@ -89,7 +90,7 @@ pub struct GetContractStateResult {
     //how many b_accounts there are
     pub b_accounts_count: U64,
     pub total_collateral_shares: U128,
-    pub usdnear_apr_basis_points: u16,
+    pub usdnear_apr_basis_points: u32,
 }
 
 /// Struct returned from get_contract_params
@@ -102,7 +103,8 @@ pub struct ContractParamsJSON {
     pub min_collateral_basis_points: u32,
     pub borrowing_paused: bool, 
     pub min_account_balance: U128String,
-    pub usdnear_apr_basis_points: u16, //2.5% default
+    pub usdnear_apr_basis_points: u32, //2.5% default
+    pub epochs_per_year: u32, //365*2 default
     /// operator_fee_basis_points. 100 basis point => 1%. E.g.: owner_fee_basis_points=50 => 0.5% owner's fee
     pub operator_fee_basis_points: u16,
     /// treasury_cut_basis_points. 

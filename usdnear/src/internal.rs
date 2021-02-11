@@ -1,46 +1,38 @@
 use crate::*;
-use near_sdk::{near_bindgen, Balance};
 
 pub use crate::types::*;
 pub use crate::utils::*;
-
-/****************************/
-/* general Internal methods */
-/****************************/
-impl UsdNearStableCoin {
-    /// Asserts that the method was called by the owner.
-    pub fn assert_owner_calling(&self) {
-        assert_eq!(
-            &env::predecessor_account_id(),
-            &self.owner_account_id,
-            "Can only be called by the owner"
-        )
-    }
-}
 
 pub fn assert_min_amount(amount: u128) {
     assert!(amount >= FIVE_NEAR, "minimun amount is 5N");
 }
 
-/***************************************/
-/* Internal methods staking-pool trait */
-/***************************************/
-#[near_bindgen]
+/****************************/
+/* general Internal methods */
+/****************************/
 impl UsdNearStableCoin {
+    
+    /// Asserts that the method was called by the owner.
+    pub(crate) fn assert_owner_calling(&self) {
+        assert!(&env::predecessor_account_id()==&self.owner_account_id,"Can only be called by the owner");
+    }
+
+    /// Asserts the contract is not busy between async calls
+    pub(crate) fn assert_not_busy(&self) {
+        assert!(!self.busy,"busy");
+    }
+
 
     //------------------------------
     pub(crate) fn internal_withdraw_stnear(&mut self, stnear_amount_requested: u128) {
         
+        self.assert_not_busy();
+
         let account_id = env::predecessor_account_id();
-
-        if self.busy_accounts.contains(&account_id) {
-            panic!("account is busy");
-        }
-
         let acc = self.internal_get_account(&account_id);
 
         let total_stnear = self.amount_from_collateral_shares(acc.collateral_shares);
-        let locked_stnear = acc.outstanding_loans_usdnear/self.current_stnear_price;
+        let locked_stnear = acc.locked_collateral_stnear(self);
         let stnear_available = total_stnear.saturating_sub(locked_stnear);
 
         assert!(
@@ -54,8 +46,8 @@ impl UsdNearStableCoin {
             { stnear_available } 
         else  { stnear_amount_requested };
 
-        //mark acc as busy - block reentry
-        self.busy_accounts.insert(&account_id);
+        //mark as busy - block reentry
+        self.busy = true;
 
         //launch async to trasnfer stNEAR from this contract to the user
         ext_meta_pool::ft_transfer(
@@ -67,7 +59,7 @@ impl UsdNearStableCoin {
             NO_DEPOSIT,
             gas::TRANSFER_STNEAR,
         )
-        .then(ext_self_owner::after_transfer_stnear_to_user( //after transfer callback here
+        .then(ext_self_callback::after_transfer_stnear_to_user( //after transfer callback here
             account_id,
             amount_to_transfer,
             //------------
@@ -76,7 +68,6 @@ impl UsdNearStableCoin {
             gas::AFTER_TRANSFER_STNEAR,
         ));
     }
-
     //prev fn continues here
     /// Called after transfer stNear to the user
     pub fn after_transfer_stnear_to_user(
@@ -85,13 +76,31 @@ impl UsdNearStableCoin {
         amount: u128,
     ) {
         assert_callback_calling();
+        self.busy= false;
         if is_promise_success() {
-            //the stNEAR transfer was successful
+            //the stNEAR withdrawal was successful
             self.remove_amount_and_shares_preserve_share_price(&account_id,amount);
         }
-        self.busy_accounts.remove(&account_id);
     }
 
+
+    //internal fn MUST not panic
+    pub(crate) fn remove_amount_and_shares_preserve_share_price(
+        &mut self,
+        account_id: &AccountId,
+        amount: u128,
+    ) {
+        if amount > 0 {
+            let num_shares = self.collateral_shares_from_amount(amount);
+            //burn shares in the user acc
+            let acc = &mut self.internal_get_account(account_id);
+            acc.collateral_shares = acc.collateral_shares.saturating_sub(num_shares);
+            self.internal_update_account(account_id, &acc);
+            // reduce stNEAR amount and burn total shares in the contract
+            self.total_collateral_shares = self.total_collateral_shares.saturating_sub(num_shares);
+            self.total_collateral_stnear = self.total_collateral_stnear.saturating_sub(amount);
+        }
+    }
 
     //--------------------------------
     pub(crate) fn add_amount_and_shares_preserve_share_price(
@@ -104,36 +113,15 @@ impl UsdNearStableCoin {
             let account = &mut self.internal_get_account(&account_id);
             account.collateral_shares += num_shares;
             &self.internal_update_account(&account_id, &account);
-            // Increasing the total amount of "stake" shares.
+            // Increasing the total amount of collateral shares.
             self.total_collateral_shares += num_shares;
             self.total_collateral_stnear += amount;
         }
     }
 
-    pub(crate) fn remove_amount_and_shares_preserve_share_price(
-        &mut self,
-        account_id: &AccountId,
-        amount: u128,
-    ) {
-        if amount > 0 {
-            let num_shares = self.collateral_shares_from_amount(amount);
-            //burn shares in the user acc
-            let acc = &mut self.internal_get_account(account_id);
-            //docuble-check can't remove locked collateral
-            let locked_stnear = acc.outstanding_loans_usdnear/self.current_stnear_price;
-            let net_shares = acc.collateral_shares - self.collateral_shares_from_amount(locked_stnear);
-            assert!( net_shares >= num_shares, "ERR NET collateral shares {} < num_shares_to_remove {}",net_shares,num_shares);
-            acc.collateral_shares -= num_shares;
-            self.internal_update_account(account_id, &acc);
-            // reduce stNEAR amount and burn total shares in the contract
-            self.total_collateral_shares -= num_shares;
-            self.total_collateral_stnear -= amount;
-        }
-    }
-
     /// Returns the number of shares corresponding to the given stnear amount at current share_price
     /// if the amount & the shares are incorporated, price remains the same
-    pub(crate) fn collateral_shares_from_amount(&self, amount: Balance) -> u128 {
+    pub(crate) fn collateral_shares_from_amount(&self, amount: u128) -> u128 {
         return shares_from_amount(amount, self.total_collateral_stnear, self.total_collateral_shares);
     }
 
@@ -155,6 +143,16 @@ impl UsdNearStableCoin {
         } else {
             self.b_accounts.insert(account_id, account); //insert_or_update
         }
+    }
+
+    pub(crate) fn usdnear_transfer(&mut self, sender_id: &AccountId, receiver_id: &AccountId, amount:u128) {
+        let sender_balance = self.usdnear_balances.get(&sender_id).unwrap_or_default();
+        let receiver_balance = self.usdnear_balances.get(&receiver_id).unwrap_or_default();
+        //check sender balance
+        assert!(sender_balance>=amount,"Not enough balance {}",sender_balance);
+        //update balances
+        self.usdnear_balances.insert(&sender_id, &(sender_balance - amount));
+        self.usdnear_balances.insert(&receiver_id, &(receiver_balance + amount));
     }
 
 }
