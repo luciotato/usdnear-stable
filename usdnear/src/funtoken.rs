@@ -34,10 +34,10 @@ impl UsdNearStableCoin {
     /// Transfer `amount` of tokens from the caller (`predecessor_id`) to `receiver_id`.
     /// Requirements:
     #[payable]
-    pub fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128String, #[allow(unused_variables)] msg:String, #[allow(unused_variables)] memo:String){
+    pub fn ft_transfer(&mut self, receiver_id: AccountId, amount: U128String, #[allow(unused_variables)] memo:Option<String>){
 
         //block function-call keys
-        assert_one_yocto();
+        //assert_one_yocto(); commented until fixed in wallet (no way to attach a single yocto)
 
         //transfer
         self.usdnear_transfer(&env::predecessor_account_id(), &receiver_id, amount.0);
@@ -48,10 +48,10 @@ impl UsdNearStableCoin {
     /// * receiver_id must be a contract and must respond to `ft_on_transfer(&mut self, sender_id: AccountId, amount: U128String, _msg: String ) -> u128`
     /// * if receiver_id is not a contract or `ft_on_transfer` fails, the transfer is rolled-back
     #[payable]
-    pub fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128String, msg:String, #[allow(unused_variables)] memo:String){
+    pub fn ft_transfer_call(&mut self, receiver_id: AccountId, amount: U128String, msg:String, #[allow(unused_variables)] memo:Option<String>){
 
         //block function-call keys
-        assert_one_yocto();
+        //assert_one_yocto(); commented until fixed in wallet (no way to attach a single yocto)
 
         //transfer
         self.usdnear_transfer(&env::predecessor_account_id(), &receiver_id, amount.0);

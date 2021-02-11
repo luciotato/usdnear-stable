@@ -158,8 +158,8 @@ impl UsdNearStableCoin {
     /// Sets contract parameters 
     pub fn set_stnear_price_usd(&mut self, stnear_price_usd:U128String) {
         self.assert_owner_calling();
-        //allow 10% variation max
-        assert!(stnear_price_usd.0 * 9/10 < self.current_stnear_price && stnear_price_usd.0 * 11/10 > self.current_stnear_price );
+        //allow 25% variation max
+        assert!(stnear_price_usd.0 > self.current_stnear_price* 75/100 && stnear_price_usd.0 < self.current_stnear_price * 125/100 );
         self.current_stnear_price = stnear_price_usd.0;
     }
     

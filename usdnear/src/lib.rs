@@ -40,7 +40,7 @@ pub const NSLP_INTERNAL_ACCOUNT: &str = "..NSLP..";
 #[ext_contract(ext_meta_pool)]
 pub trait ExtMetaPoolContract {
     fn get_account_total_balance(&self, account_id: AccountId) -> U128String;
-    fn ft_transfer(receiver_id: AccountId, amount: U128String, memo:String);
+    fn ft_transfer(receiver_id: AccountId, amount: U128String, memo:Option<String>);
 }
 
 // callbacks here defined as traits to make it easy to create the promise
@@ -312,7 +312,7 @@ impl UsdNearStableCoin {
         ext_meta_pool::ft_transfer(
             account_id.clone(),
             amount_to_transfer.into(),
-            String::from(""), //memo
+            None, //memo
             //------------
             &META_POOL_STNEAR_CONTRACT,
             NO_DEPOSIT,
