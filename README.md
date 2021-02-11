@@ -1,5 +1,18 @@
 # USDNEAR Overcollateralized Convertible Stablecoin
 
+The first NEAR Stablecoin, backed by staking, with self-paid low interest, and convertible.
+
+## Advantages
+
+*Trust*: We chose a simple design to make the system transparent, easy to understand, and highly reliable. The contract has a  Conversion Window where USDNEAR owners can exchange their tokens for stNEAR from the collateral pool. The rate is fixed, so "1 USDNEAR" always equals "1 USD woth of stNEAR" at the current market price. The over-collaterization rate is 200%, so there is ample funds to feed the conversion window.
+
+*Ease of use*: NEAR accounts are "named accounts" where users choose their account name, e.g.: 'alice.near'. Having readable account names, very low fees, and a stablecoin are drivers for mass adoption outside of the crypto enthusiast circle. A stablecoin with fees less than a cent and readable account names becomes useful and usable.
+
+*Fees*: Stablecoins on Ethereum are hampered by astronomical fees. The fee to send DAI 100 could reach USD 15 or more. Ethereum fees make low-amount operation impossible. On the other hand, the fees on the NEAR blockchain are tenths of a cent, so minting USDNEAR and sending the tokens costs only a fraction of a cent.
+
+*Auto-paid Interest*: Staked Near receives staking rewards every 12 hours (each NEAR Epoch), so the interest on the loan is paid from the staking rewards, the collateral naturally increases and never decreases. The whole process is transparent and automatic on the NEAR Blockchain. Users can keep reap staking rewards and at the same time mint a stablecoin to use without the volatility of the market.
+
+
 ## How it works
 
 ### Issuance
