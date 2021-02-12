@@ -38,11 +38,13 @@ Collateralization levels are determined by using price data reported by an oracl
 
 ### Conversion Window
 
-Any USDNEAR token owner can convert their token into stNEAR. The amount of stNEAR the user receives is computed from the market price of NEAR so the conversion is always "1 USDNEAR" = "1 USD worth of stNEAR". The conversion window transfers the amount of stNEAR from the collateral pool to the user, and receives and burns USDNEAR. Since USDNEAR is burned, the total Overcollateralization ratio remains the same.  This conversion mechanism does not change any of the existing loans. The users with outstanding loans still need to repay their loans in order to free their collateral.
+Any USDNEAR token owner can convert their token into stNEAR. The amount of stNEAR the user receives is computed from the market price of NEAR so the conversion is always "1 USDNEAR" = "1 USD worth of stNEAR". The conversion window transfers the amount of stNEAR from the collateral pool to the user, and receives and burns USDNEAR. Since USDNEAR is burned, the total Overcollateralization ratio remains the same. 
 
 The existence of a conversion fixed-rate window where "1 USDNEAR" = "1 USD worth of stNEAR", guarantees the stability of USDNEAR. The overcollateralization guarantees conversion availability, protecting USDNEAR holders form the collateral asset (stNEAR) price volatility.
 
 The main users exchanging USDNEAR on the conversion window are those users that received USDNEAR token as payment or in exchange for other assets and want to convert USDNEAR to stNEAR. Other token owners could choose to expend their USDNEAR, keeping the coins on circulation. The users with oustanding loans use the USDNEAR they receive to reduce or repay their loans.
+
+The conversion is paid from the user's locked collateral. After a conversion all users with outstanding loans will owe a little less (USDNEAR was burned) but they will also have that USD amount deducted from their locked collateral value. In the extreme case that all the USDNEAR in circulation is converted and burned, all loans will be reduced to zero (no more USDNEAR in circulation) and all locked collaterals (users with outstanding loans) would have been reduced by the same USD amount.  
 
 ### Minimum collateralization and Liquidation
 

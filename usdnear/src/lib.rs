@@ -345,6 +345,29 @@ impl UsdNearStableCoin {
     }
 
 
+    pub fn convert_usdnear(&mut self, usdnear_to_convert:U128String){
+        // get usdnear balance for this user
+        let usdnear_balance = self.usdnear_balances.get(&env::predecessor_account_id()).unwrap_or_default();
+        // can't use what they don't have
+        assert!(usdnear_balance>=usdnear_to_convert.0,"Noy enough balance, you have USDNEAR {}",usdnear_balance);
+        //compute stNEAR amount
+        let stnear = self.usdnear_to_stnear(usdnear_to_convert.0);
+        //get account
+        let mut acc = self.internal_get_account(&env::predecessor_account_id());
+        // do the user owe usdnear?
+        assert!(acc.outstanding_loans_usdnear>0,"You owe no USDNEAR");
+        // max to repay is what they owe
+        let to_repay = if usdnear_to_convert.0 > acc.outstanding_loans_usdnear {acc.outstanding_loans_usdnear} else {usdnear_to_convert.0};
+        // repay & save acc
+        acc.outstanding_loans_usdnear-=to_repay;
+        self.internal_update_account(&env::predecessor_account_id(), &acc);
+        // burn usdnear for the user & the contract
+        self.usdnear_balances.insert(&env::predecessor_account_id(), &(usdnear_balance-to_repay));
+        self.total_usdnear-=to_repay;
+
+    }
+
+
     pub fn take_loan(&mut self, usdnear_amount:U128String) {
         assert!(usdnear_amount.0>=1*NEAR,"min loan is 1 USDNEAR");
         //get account
