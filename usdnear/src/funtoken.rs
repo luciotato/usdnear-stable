@@ -28,7 +28,7 @@ impl UsdNearStableCoin {
 
     /// Returns the balance of the given account ID. Returns `0` balance, if the account doesn't exist.
     pub fn ft_balance_of(&self, account_id: AccountId) -> U128String {
-        return self.usdnear_balances.get(&account_id).unwrap_or_default().into()
+        return self.get_usdnear_balance(&account_id).into()
     }
 
     /// Transfer `amount` of tokens from the caller (`predecessor_id`) to `receiver_id`.

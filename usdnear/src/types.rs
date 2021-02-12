@@ -70,6 +70,7 @@ pub struct GetAccountInfoResult {
     pub stnear_price_usd: U128,
     pub usdnear_credit_limit: U128,
     pub locked_stnear: U128,
+    pub valued_collateral_usd: U128,
     pub outstanding_loans_usdnear: U128,
     pub collateralization_ratio: u32, //basis points, max 999%
     pub stbl: U128,

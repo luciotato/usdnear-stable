@@ -44,18 +44,18 @@ impl UsdNearStableCoin {
     /// full account info
     /// Returns JSON representation of the account for the given account ID.
     pub fn get_account_info(&self, account_id: AccountId) -> GetAccountInfoResult {
-        let usdnear = self.usdnear_balances.get(&account_id).unwrap_or_default(); 
+        let usdnear = self.get_usdnear_balance(&account_id); 
         let acc = self.internal_get_account(&account_id);
-        let stnear = self.amount_from_collateral_shares(acc.collateral_shares);
         return GetAccountInfoResult {
             account_id,
             usdnear: usdnear.into(),
-            stnear: stnear.into(),
+            stnear: acc.free_stnear(&self).into(),
             stnear_price_usd: self.current_stnear_price.into(),
             stbl: acc.stbl.into(),
             usdnear_credit_limit: acc.get_current_credit_limit(self).into(),
-            outstanding_loans_usdnear: acc.outstanding_loans_usdnear.into(),
-            locked_stnear: acc.locked_collateral_stnear(&self).into(),
+            locked_stnear: acc.locked_stnear(&self).into(),
+            valued_collateral_usd: acc.valued_collateral_usd(&self).into(),
+            outstanding_loans_usdnear: acc.outstanding_loans_usdnear(self).into(),
             collateralization_ratio: acc.get_current_collateralization_ratio(&self),
         };
     }
@@ -246,12 +246,21 @@ impl UsdNearStableCoin {
             let interest_epoch_usdnear = interest_year_usdnear / self.epochs_per_year as u128; //default 365*2, 2 epochs per day
             let interest_epoch_stnear = self.usdnear_to_stnear(interest_epoch_usdnear);
 
-            //add interest stNEAR to treasury
-            &self.add_amount_and_shares_preserve_share_price(self.treasury_account_id.clone(),interest_epoch_stnear);
-            log!("treasury got {} as epoch interest",interest_epoch_stnear);
+            //compute rewards to distribute between locked-stnear-pool and free-stnear-pool
+            let rewards_to_distribute = rewards - interest_epoch_stnear;
+            let total_stnear_in_the_contract = self.total_free_stnear + self.total_collateral_stnear;
+            let rewards_for_free_stnear = proportional(rewards_to_distribute, self.total_free_stnear, total_stnear_in_the_contract);
+            let rewards_for_locked_stnear = proportional(rewards_to_distribute, self.total_collateral_stnear, total_stnear_in_the_contract);
+
+            //add interest stNEAR to treasury (computed by difference)
+            assert!(rewards>=rewards_for_free_stnear+rewards_for_locked_stnear);
+            let amount_for_treasury = rewards - rewards_for_free_stnear - rewards_for_locked_stnear;
+            &self.add_amount_and_free_shares_preserve_share_price(self.treasury_account_id.clone(), amount_for_treasury);
+            log!("treasury got {} as epoch interest payment",amount_for_treasury);
             
-            // rest of staking rewards go into total_collateral increasing share value -> stNEAR amounts for everyone
-            self.total_collateral_stnear += rewards - interest_epoch_stnear; 
+            // rest of staking rewards go into free and collateral pools, increasing share value -> stNEAR amounts for everyone
+            self.total_collateral_stnear += rewards_for_free_stnear;
+            self.total_collateral_stnear += rewards_for_locked_stnear;
 
             self.last_rewards_epoch_height = env::epoch_height();
 

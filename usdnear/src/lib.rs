@@ -75,12 +75,16 @@ pub trait SelfCallbacks {
 // -----------------
 #[derive(BorshDeserialize, BorshSerialize, Debug, PartialEq)]
 pub struct BorrowingAccount {
-    /// The amount of shares of the total staked collateral this user owns.
+    /// The amount of shares of the total deposited free.stear this user owns. Deposited stNEAR is "free" until gets "locked" if the user takes a loan.
     /// Because the amount of stNEAR naturally increases with epoch rewards, each acc has an amount of "shares" to be converted to a stNEAR amount on demand
     /// shares * share_price = amount of stNEARs
-    collateral_shares: u128,
-    ///amount of usdnear owed
-    outstanding_loans_usdnear: u128, 
+    free_shares: u128,
+    /// The amount of shares of the total locked collateral this user owns. The user has outstanding loans.
+    /// Because the amount of stNEAR naturally increases with epoch rewards, each acc has an amount of "shares" to be converted to a stNEAR amount on demand
+    /// shares * share_price = amount of stNEARs
+    locked_collateral_shares: u128,
+    /// usdnear owed -> shares of total usdnear in circulation 
+    shares_usdnear_owed: u128, 
     //-- STBL
     // governance token - TODO
     pub stbl: u128,
@@ -91,8 +95,9 @@ pub struct BorrowingAccount {
 impl Default for BorrowingAccount {
     fn default() -> Self {
         Self {
-            collateral_shares: 0,
-            outstanding_loans_usdnear:0,
+            free_shares:0,
+            locked_collateral_shares: 0,
+            shares_usdnear_owed:0,
             stbl: 0,
         }
     }
@@ -101,50 +106,164 @@ impl Default for BorrowingAccount {
 impl BorrowingAccount {
     /// when the account.is_empty() it will be removed
     fn is_empty(&self) -> bool {
-        return self.collateral_shares == 0
+        return self.free_shares == 0
+            && self.locked_collateral_shares == 0
             && self.stbl == 0
-            && self.outstanding_loans_usdnear == 0
+            && self.shares_usdnear_owed == 0
             ;
     }
 
-    fn valued_collateral_usd(&self, main:&UsdNearStableCoin) -> u128 {
-        let actual_collateral_stnear = main.amount_from_collateral_shares(self.collateral_shares);
-        return main.stnear_to_usd(actual_collateral_stnear);
+    fn outstanding_loans_usdnear(&self, main:&UsdNearStableCoin) -> u128 {
+        return main.amount_from_usdnear_shares(self.shares_usdnear_owed);
     }
 
-    fn required_collateral_stnear(&self, main:&UsdNearStableCoin) -> u128 {
-        if self.outstanding_loans_usdnear==0 {return 0}; 
-        let required_collateral_usdnear = apply_pct(main.collateral_basis_points, self.outstanding_loans_usdnear);
+    fn free_stnear(&self, main:&UsdNearStableCoin) -> u128 {
+        return main.amount_from_free_shares(self.free_shares);
+    }
+    fn locked_stnear(&self, main:&UsdNearStableCoin) -> u128 {
+        return main.amount_from_collateral_shares(self.locked_collateral_shares);
+    }
+    fn valued_collateral_usd(&self, main:&UsdNearStableCoin) -> u128 {
+        return main.stnear_to_usd(self.locked_stnear(main));
+    }
+
+   fn required_collateral_stnear(&self, main:&UsdNearStableCoin) -> u128 {
+        if self.shares_usdnear_owed==0 {return 0}; 
+        let required_collateral_usdnear = ONE_NEAR_CENT/2 + apply_pct(main.collateral_basis_points, self.outstanding_loans_usdnear(main));
         return main.usdnear_to_stnear(required_collateral_usdnear);
     }
 
-    fn locked_collateral_stnear(&self, main:&UsdNearStableCoin) -> u128 {
-        if self.outstanding_loans_usdnear==0 {return 0}; 
-        let required_collateral_stnear = self.required_collateral_stnear(main);
-        let actual_collateral_stnear = main.amount_from_collateral_shares(self.collateral_shares);
-        return if required_collateral_stnear<actual_collateral_stnear {required_collateral_stnear} else {actual_collateral_stnear};
-    }
+    // fn locked_collateral_stnear(&self, main:&UsdNearStableCoin) -> u128 {
+    //     if self.outstanding_loans_usdnear==0 {return 0}; 
+    //     let required_collateral_stnear = self.required_collateral_stnear(main);
+    //     let actual_collateral_stnear = main.amount_from_collateral_shares(self.locked_collateral_shares);
+    //     return if required_collateral_stnear<actual_collateral_stnear {required_collateral_stnear} else {actual_collateral_stnear};
+    // }
 
-    //max usdnear for this acc, according to collateral, price and collateral_basis_points
+    //max usdnear for this acc, according to valued potential collateral and required over-collateral % (basis_points)
     fn max_usdnear(&self, main:&UsdNearStableCoin) -> u128 {
-        let valued_collateral_usd = self.valued_collateral_usd(main);
-        return (U256::from(valued_collateral_usd) * U256::from(10000) / U256::from(main.collateral_basis_points)).as_u128();
+        let free_stnear = self.free_stnear(main);
+        let locked_stnear = self.locked_stnear(main);
+        let total_valued = main.stnear_to_usd(free_stnear+locked_stnear);
+        return (U256::from(total_valued) * U256::from(10000) / U256::from(main.collateral_basis_points)).as_u128();
     }
 
     fn get_current_credit_limit(&self, main:&UsdNearStableCoin) -> u128 {
         let max_usdnear = self.max_usdnear(main);
-        return max_usdnear.saturating_sub(self.outstanding_loans_usdnear);
+        return max_usdnear.saturating_sub(self.outstanding_loans_usdnear(main));
     }
 
     /// returns basis points
     /// if collateral ratio >999%, returns 999%
     fn get_current_collateralization_ratio(&self, main:&UsdNearStableCoin) -> u32 {
         const MAX:u32 = 999*PERCENT_BP;
-        if self.outstanding_loans_usdnear==0 {return MAX}; 
-        let valued_collateral = self.valued_collateral_usd(main);
-        let ratio = (U256::from(valued_collateral) * U256::from(10000) / U256::from(self.outstanding_loans_usdnear)).as_u128();
+        if self.shares_usdnear_owed==0 {return MAX}; 
+        let ratio = (U256::from(self.valued_collateral_usd(main)) * U256::from(10000) / U256::from(self.outstanding_loans_usdnear(main))).as_u128();
         if ratio>MAX as u128 {return MAX}; 
         return ratio as u32;
+    }
+
+    //---------------------------------
+    fn add_owed_usdnear_preserve_share_price(
+        &mut self,
+        amount: u128,
+        main:&mut UsdNearStableCoin
+    ) {
+        if amount > 0 {
+            let num_shares = main.usdnear_shares_from_amount(amount);
+            //add shares to the the user acc
+            self.shares_usdnear_owed += num_shares;
+            // add to total in circulation
+            main.total_usdnear_shares += num_shares;
+            main.total_usdnear += amount;
+        }
+    }
+    fn remove_owed_usdnear_preserve_share_price(
+        &mut self,
+        amount: u128,
+        main:&mut UsdNearStableCoin
+    ) {
+        if amount > 0 {
+            let num_shares = main.usdnear_shares_from_amount(amount);
+            //burn shares in the user acc
+            self.shares_usdnear_owed = self.shares_usdnear_owed.saturating_sub(num_shares);
+            // reduce stNEAR amount and burn total shares in the contract
+            main.total_usdnear_shares = main.total_usdnear_shares.saturating_sub(num_shares);
+            main.total_usdnear = main.total_usdnear.saturating_sub(amount);
+        }
+    }
+
+    fn add_free_amount_preserve_share_price(
+        &mut self,
+        amount: u128,
+        main:&mut UsdNearStableCoin
+    ) {
+        if amount > 0 {
+            let num_shares = main.free_shares_from_amount(amount);
+            //add shares to the the user acc
+            self.free_shares += num_shares;
+            // add to locked stNEAR amount
+            main.total_free_shares += num_shares;
+            main.total_free_stnear += amount;
+        }
+    }
+    fn remove_free_amount_preserve_share_price(
+        &mut self,
+        amount: u128,
+        main:&mut UsdNearStableCoin
+    ) {
+        if amount > 0 {
+            let num_shares = main.free_shares_from_amount(amount);
+            //burn shares in the user acc
+            self.free_shares = self.free_shares.saturating_sub(num_shares);
+            // reduce stNEAR amount and burn total shares in the contract
+            main.total_free_shares = main.total_free_shares.saturating_sub(num_shares);
+            main.total_free_stnear = main.total_free_stnear.saturating_sub(amount);
+        }
+    }
+
+    fn add_locked_amount_preserve_share_price(
+        &mut self,
+        amount: u128,
+        main:&mut UsdNearStableCoin
+    ) {
+        if amount > 0 {
+            let num_shares = main.locked_shares_from_amount(amount);
+            //add shares to the the user acc
+            self.locked_collateral_shares += num_shares;
+            // add to locked stNEAR amount
+            main.total_collateral_shares += num_shares;
+            main.total_collateral_stnear += amount;
+        }
+    }
+    fn remove_locked_amount_preserve_share_price(
+        &mut self,
+        amount: u128,
+        main:&mut UsdNearStableCoin
+    ) {
+        if amount > 0 {
+            let num_shares = main.locked_shares_from_amount(amount);
+            //burn shares in the user acc
+            self.locked_collateral_shares = self.locked_collateral_shares.saturating_sub(num_shares);
+            // reduce stNEAR amount and burn total shares in the contract
+            main.total_collateral_shares = main.total_collateral_shares.saturating_sub(num_shares);
+            main.total_collateral_stnear = main.total_collateral_stnear.saturating_sub(amount);
+        }
+    }
+
+    //if more collateral is required, moves from free to locked
+    fn add_locked_collateral(&mut self, main:&mut UsdNearStableCoin){
+        let required_locked = self.required_collateral_stnear(main);
+        //how much locked stNEAR collateral is there?
+        let locked_now = self.locked_stnear(main);
+        if locked_now < required_locked {
+            //we have to add more collateral
+            //how much free stNEAR is there?
+            let free_now = self.free_stnear(main);
+            let to_add = std::cmp::min(free_now, required_locked - locked_now);
+            self.remove_free_amount_preserve_share_price(to_add,main);
+            self.add_locked_amount_preserve_share_price(to_add,main);
+        }
     }
 }
 
@@ -168,13 +287,25 @@ pub struct UsdNearStableCoin {
     /// collateral % when liquidation is opened
     pub min_collateral_basis_points: u32, 
 
-    /// This amount increments with minting (borrowing) and decrements with burns (repayment)
+    /// This amounts increments with minting (borrowing) and decrements with burns (repayment)
     pub total_usdnear: u128,
+    /// how many "usdnear shares" exist. Everytime someone mints usdnear, shares are created
+    /// When usdnear is converted to stNEAR, total_usdnear is decremented but shares remain the same
+    /// to every user with outstanding loans, owes a little less
+    pub total_usdnear_shares: u128,
 
     /// This amount increments with users depositing stNEAR and decrements with users withdrawing stNEAR
     /// This amouns also is incremented when the staking rewards are collected every epoch
+    pub total_free_stnear: u128,
+    /// how many "free shares" were minted. Everytime someone desposits stNEAR they get free_shares
+    /// the buy share price is computed so if they "sells" the shares on that moment they recover the same stNEAR amount
+    /// when someone withdraws stNEAR they burn X shares at current price to recoup Y stNEAR
+    pub total_free_shares: u128,
+    
+    /// This amount increments with users taking loans and decrements with users repaying loans
+    /// This amouns also is incremented when the staking rewards are collected every epoch
     pub total_collateral_stnear: u128,
-    /// how many "collateral shares" were minted. Everytime someone desposits stNEAR (collateral) they get collateral_shares
+    /// how many "collateral shares" were minted. Everytime someone desposits stNEAR (collateral) they get locked_collateral_shares
     /// the buy share price is computed so if they "sells" the shares on that moment they recover the same stNEAR amount
     /// when someone withdraws stNEAR they burn X shares at current price to recoup Y stNEAR
     pub total_collateral_shares: u128,
@@ -259,6 +390,9 @@ impl UsdNearStableCoin {
             treasury_fee_basis_points: 7000, //70% from 2.5%
             borrowing_paused: false,  
             total_usdnear: 0,
+            total_usdnear_shares: 0,
+            total_free_stnear: 0,
+            total_free_shares: 0,
             total_collateral_stnear: 0,
             total_collateral_shares: 0,
             total_stbl: 0,
@@ -269,14 +403,14 @@ impl UsdNearStableCoin {
         };
     }
 
-    /// ---Indirect DEPOSIT/ADD stNEAR COLLATERAL--- (stNEAR is a NEP-141 fungible token standard)
-    /// To "deposit some stNEAR"/"add collateral" the web app must call META_POOL_STNEAR_CONTRACT.ft_transfer_call("usdnear.stable.testnet", [amount])
+    /// ---Indirect DEPOSIT/ADD free stNEAR--- (stNEAR is a NEP-141 fungible token standard)
+    /// To "deposit some stNEAR" the web app must call META_POOL_STNEAR_CONTRACT.ft_transfer_call("usdnear.stable.testnet", [amount])
     /// the amount is transferred and then the META_POOL_STNEAR_CONTRACT will call this fn ft_on_transfer
     pub fn ft_on_transfer(&mut self, sender_id: AccountId, amount: U128String, _msg: String ) -> u128 { 
         //verify this is a callback from META_POOL_STNEAR_CONTRACT
         assert_eq!(env::predecessor_account_id(), META_POOL_STNEAR_CONTRACT);
         //register the stNEAR into our internal accounting for the sender
-        self.add_amount_and_shares_preserve_share_price(sender_id, amount.0);
+        self.add_amount_and_free_shares_preserve_share_price(sender_id, amount.0);
         //all stNEAR used
         return 0;
     }
@@ -289,14 +423,12 @@ impl UsdNearStableCoin {
         let account_id = env::predecessor_account_id();
         let acc = self.internal_get_account(&account_id);
 
-        let total_stnear = self.amount_from_collateral_shares(acc.collateral_shares);
-        let locked_stnear = acc.locked_collateral_stnear(self);
-        let stnear_available = total_stnear.saturating_sub(locked_stnear);
+        let stnear_available = self.amount_from_free_shares(acc.free_shares);
 
         assert!(
             stnear_available >= amount.0,
-            "Not enough stNEAR balance to withdraw the requested amount. You have stNEAR {} total, {} locked and {} available", 
-            total_stnear, locked_stnear, stnear_available 
+            "Not enough stNEAR to withdraw the requested amount. You have only stNEAR {} free", 
+            stnear_available 
         );
 
         let amount_to_transfer  = 
@@ -340,69 +472,48 @@ impl UsdNearStableCoin {
         //debug!("after_transfer {} {} {}",is_promise_success(),account_id,amount.0);
         if is_promise_success() {
             //the stNEAR withdrawal was successful
-            self.remove_amount_and_shares_preserve_share_price(&account_id,amount.0);
+            self.remove_amount_and_free_shares_preserve_share_price(&account_id,amount.0);
         }
     }
 
 
-    pub fn convert_usdnear(&mut self, usdnear_to_convert:U128String){
-        // get usdnear balance for this user
-        let usdnear_balance = self.usdnear_balances.get(&env::predecessor_account_id()).unwrap_or_default();
-        // can't use what they don't have
-        assert!(usdnear_balance>=usdnear_to_convert.0,"Noy enough balance, you have USDNEAR {}",usdnear_balance);
-        //compute stNEAR amount
-        let stnear = self.usdnear_to_stnear(usdnear_to_convert.0);
-        //get account
-        let mut acc = self.internal_get_account(&env::predecessor_account_id());
-        // do the user owe usdnear?
-        assert!(acc.outstanding_loans_usdnear>0,"You owe no USDNEAR");
-        // max to repay is what they owe
-        let to_repay = if usdnear_to_convert.0 > acc.outstanding_loans_usdnear {acc.outstanding_loans_usdnear} else {usdnear_to_convert.0};
-        // repay & save acc
-        acc.outstanding_loans_usdnear-=to_repay;
-        self.internal_update_account(&env::predecessor_account_id(), &acc);
-        // burn usdnear for the user & the contract
-        self.usdnear_balances.insert(&env::predecessor_account_id(), &(usdnear_balance-to_repay));
-        self.total_usdnear-=to_repay;
-
-    }
-
-
     pub fn take_loan(&mut self, usdnear_amount:U128String) {
-        assert!(usdnear_amount.0>=1*NEAR,"min loan is 1 USDNEAR");
+        assert!(usdnear_amount.0>=5*NEAR,"min loan is 5 USDNEAR");
         //get account
         let mut acc = self.internal_get_account(&env::predecessor_account_id());
-        //get current creditr limit
+        //get current credit limit
         let limit = acc.get_current_credit_limit(&self);
-        assert!(usdnear_amount.0<=limit,"You can only take USDNEAR {} as loan. Add more collateral to extend your credit",limit);
-        //take loan & update acc
-        acc.outstanding_loans_usdnear+=usdnear_amount.0;
+        assert!(usdnear_amount.0<=limit,"You can only take USDNEAR {} as loan. Deposit more stNEAR to extend your credit",limit);
+        //get current usdnear balance
+        let usdnear_balance = self.get_usdnear_balance(&env::predecessor_account_id());
+        //take loan, mint USDNEAR, add to owed USDNEAR and also to total usdnear in circulation 
+        acc.add_owed_usdnear_preserve_share_price(usdnear_amount.0, self);
+        //balance (add/remove) locked collateral based on new owed-amount and current price
+        acc.add_locked_collateral(self);
+        //save account
         self.internal_update_account(&env::predecessor_account_id(), &acc);
-        //get current balance
-        let usdnear_balance = self.usdnear_balances.get(&env::predecessor_account_id()).unwrap_or_default();
-        //add newly minted usdenars
-        self.usdnear_balances.insert(&env::predecessor_account_id(), &(usdnear_balance+usdnear_amount.0));
-        //add also to contract total
-        self.total_usdnear+=usdnear_amount.0;
+        //add corresponding newly minted USDNEAR to the user usdnear balance
+        self.set_usdnear_balance(&env::predecessor_account_id(), usdnear_balance+usdnear_amount.0);
+
     }
 
     pub fn repay_loan(&mut self, usdnear_amount:U128String) {
         //get account
         let mut acc = self.internal_get_account(&env::predecessor_account_id());
         // do the user owe usdnear?
-        assert!(acc.outstanding_loans_usdnear>0,"You owe no USDNEAR");
+        assert!(acc.shares_usdnear_owed>0,"You owe no USDNEAR");
         // max to repay is what they owe
-        let to_repay = if usdnear_amount.0 > acc.outstanding_loans_usdnear {acc.outstanding_loans_usdnear} else {usdnear_amount.0};
+        let to_repay = std::cmp::min(acc.outstanding_loans_usdnear(self), usdnear_amount.0);
         // get usdnear balance for this user
-        let usdnear_balance = self.usdnear_balances.get(&env::predecessor_account_id()).unwrap_or_default();
+        let usdnear_balance = self.get_usdnear_balance(&env::predecessor_account_id());
         // can't use what they don't have
         assert!(usdnear_balance>=to_repay,"You have USDNEAR {}. You can not repay {}",usdnear_balance,to_repay);
-        // repay & save acc
-        acc.outstanding_loans_usdnear-=to_repay;
+        // burn used usdnear from the user balance
+        self.set_usdnear_balance(&env::predecessor_account_id(), usdnear_balance - to_repay);
+        // repay, reduce outstanding loans usdnear, and also remove from circulation (burn the paid debt)
+        acc.remove_owed_usdnear_preserve_share_price(to_repay,self);
+        //save account
         self.internal_update_account(&env::predecessor_account_id(), &acc);
-        // burn usdnear for the user & the contract
-        self.usdnear_balances.insert(&env::predecessor_account_id(), &(usdnear_balance-to_repay));
-        self.total_usdnear-=to_repay;
     }
 
     /// if loan_account_id collateral ratio is below self.min_collateral_basis_points
@@ -419,28 +530,29 @@ impl UsdNearStableCoin {
 
         //liquidator must have a borrowingAccount here, with a min stNEAR balance
         let mut liquidator_acc = self.internal_get_account(&liquidator_id);
-        assert!(self.amount_from_collateral_shares(liquidator_acc.collateral_shares) >= MIN_STNEAR_BALANCE_FOR_LIQUIDATORS,
+        assert!(self.amount_from_collateral_shares(liquidator_acc.locked_collateral_shares) >= MIN_STNEAR_BALANCE_FOR_LIQUIDATORS,
             "To be a liquidator you need to have a borrowing account with at least stNEAR {}",MIN_STNEAR_BALANCE_FOR_LIQUIDATORS);
 
         //get loan account 
         let mut loan_acc = self.internal_get_account(&loan_account_id);
         // do the loan_acc owe usdnear?
-        assert!(loan_acc.outstanding_loans_usdnear>0,"no USDNEAR owed");
+        assert!(loan_acc.shares_usdnear_owed>0,"no USDNEAR owed");
         // check collateralization
         let rate = loan_acc.get_current_collateralization_ratio(self);
         assert!(rate < self.min_collateral_basis_points, "coll.rate.BP is {}. Can't liquidate",rate);
         // compute usdnear to repay in order to to restore collatellar rate
-        let all_collateral_stnear = self.amount_from_collateral_shares(loan_acc.collateral_shares);
-        let required_collateral_usd = apply_pct(self.collateral_basis_points, loan_acc.outstanding_loans_usdnear);
-        let valued_collateral_usd = loan_acc.valued_collateral_usd(self);
+        let locked_collateral_stnear = loan_acc.locked_stnear(self);
+        let valued_collateral_usd = self.stnear_to_usd(locked_collateral_stnear);
+        let owed_usdnear = loan_acc.outstanding_loans_usdnear(self);
+        let required_collateral_usd = apply_pct(self.collateral_basis_points, owed_usdnear);
         let liq_fee_plus_100:u32 = 10000+self.liquidaton_fee_basis_points as u32;
         //cross-check, shouldn't happen at this point
         assert!(valued_collateral_usd < required_collateral_usd, "ERR: valued.collat {} >= req.coll {}",valued_collateral_usd,required_collateral_usd);
         let max_usdnear_repay: u128;
-        if valued_collateral_usd < loan_acc.outstanding_loans_usdnear { 
+        if valued_collateral_usd < owed_usdnear { 
             //catasthrophic. underwater loan. It's the responsibility of the liquidator to check this condition before this call
             //at this point we accept the liquidation even if at face value is not benefical to the liquidator
-            max_usdnear_repay = loan_acc.outstanding_loans_usdnear;
+            max_usdnear_repay = owed_usdnear;
         }
         else {
             //some room for a liquidation fee
@@ -450,33 +562,59 @@ impl UsdNearStableCoin {
         }        
 
         //the amount to repay is limited to the amount the liquidator indicated as max
-        let usdnear_repay = std::cmp::min(max_usdnear_repay, max_usdnear_buy.0);
+        //and also the total owed
+        let usdnear_repay = std::cmp::min(owed_usdnear, std::cmp::min(max_usdnear_repay, max_usdnear_buy.0));
 
         // get liquidator's usdnear balance
-        let liquidator_usdnear_balance = self.usdnear_balances.get(&liquidator_id).unwrap_or_default();
+        let liquidator_usdnear_balance = self.get_usdnear_balance(&liquidator_id);
         assert!(liquidator_usdnear_balance>=usdnear_repay,"not enough USDNEAR to repay loan. you need {}",usdnear_repay);
 
         //ok, the liquidation can proceed
 
         //from the liquidator, take usdnear amount, use it to repay loan
-        self.usdnear_balances.insert(&liquidator_id, &(liquidator_usdnear_balance-usdnear_repay));
-        // repay loan with liquidator's usdnear (burn usdnear)
-        loan_acc.outstanding_loans_usdnear-=usdnear_repay;
-        self.total_usdnear-=usdnear_repay;
+        self.set_usdnear_balance(&liquidator_id, liquidator_usdnear_balance - usdnear_repay);
+        // repay loan with liquidator's usdnear (and burn used usdnear, remove from circulation)
+        loan_acc.remove_owed_usdnear_preserve_share_price(usdnear_repay, self);
 
         //stnear_to_receive should be usdnear*(1+fee%) worth of stnear, with a hard limit set at all_collateral_stnear
-        let stnear_to_receive = std::cmp::min(all_collateral_stnear, self.usdnear_to_stnear(apply_pct(liq_fee_plus_100, usdnear_repay)));
-        let collateral_shares_plus_fee = std::cmp::min(loan_acc.collateral_shares, self.collateral_shares_from_amount(stnear_to_receive));
-
-        // move collateral stnear from loan_acc.collateral to liquidator
-        loan_acc.collateral_shares-=collateral_shares_plus_fee;
-        liquidator_acc.collateral_shares+=collateral_shares_plus_fee;
+        let stnear_to_receive = std::cmp::min(locked_collateral_stnear, self.usdnear_to_stnear(apply_pct(liq_fee_plus_100, usdnear_repay)));
+        // remove stnear from user's collateral, and add it to liquidator's account
+        loan_acc.remove_locked_amount_preserve_share_price(stnear_to_receive,self);
+        liquidator_acc.add_free_amount_preserve_share_price(stnear_to_receive,self);
 
         // save loan acc
         self.internal_update_account(&loan_account_id, &loan_acc);
         // save liquidator acc
         self.internal_update_account(&liquidator_id, &liquidator_acc);
 
+    }
+
+    //a user that received USDNEAR as payment, chooses to convert it to stNEAR 
+    pub fn convert_usdnear(&mut self, usdnear_to_convert:U128String){
+
+        // get usdnear balance for this user
+        let usdnear_balance = self.get_usdnear_balance(&env::predecessor_account_id());
+        // can't use what they don't have
+        assert!(usdnear_balance>=usdnear_to_convert.0,"Noy enough balance, you only have USDNEAR {}",usdnear_balance);
+        // remove usdnear amount from the user
+        self.set_usdnear_balance(&env::predecessor_account_id(),usdnear_balance - usdnear_to_convert.0);
+        // burn usdnear tokens (but owed_usdnear_shares remain the same), so all users with outstanding loans now owe a little less 
+        assert!(self.total_usdnear>=usdnear_to_convert.0,"ERR Not enough usdnear in circ."); //can't happen
+        self.total_usdnear -= usdnear_to_convert.0;
+
+        //compute stNEAR amount the converter will receive
+        let stnear = self.usdnear_to_stnear(usdnear_to_convert.0);
+        //get user account
+        let mut acc = self.internal_get_account(&env::predecessor_account_id());
+        // remove stnear from collateral pool, and add it to user's acc free-stnear
+        // collateral shares remain the same, so the stNEAR is paid proportionally by all users with outstanding loans
+        assert!(self.total_collateral_stnear>=stnear,"Not enough collateral available"); //can only happen if NEAR price crashes
+        // remove stnear from collateral pool
+        self.total_collateral_stnear-=stnear;
+        // add it to user's acc free-stnear
+        acc.add_free_amount_preserve_share_price(stnear,self);
+        //save account
+        self.internal_update_account(&env::predecessor_account_id(), &acc);
     }
 
 
