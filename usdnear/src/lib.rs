@@ -251,8 +251,8 @@ impl BorrowingAccount {
         }
     }
 
-    //if more collateral is required, moves from free to locked
-    fn add_locked_collateral(&mut self, main:&mut UsdNearStableCoin){
+    //if more collateral is required, moves from free to locked and viceversa
+    fn balance_locked_collateral(&mut self, main:&mut UsdNearStableCoin){
         let required_locked = self.required_collateral_stnear(main);
         //how much locked stNEAR collateral is there?
         let locked_now = self.locked_stnear(main);
@@ -264,6 +264,13 @@ impl BorrowingAccount {
             self.remove_free_amount_preserve_share_price(to_add,main);
             self.add_locked_amount_preserve_share_price(to_add,main);
         }
+        else if locked_now > required_locked {
+            //we can free collateral
+            let to_free = locked_now - required_locked;
+            self.remove_locked_amount_preserve_share_price(to_free,main);
+            self.add_free_amount_preserve_share_price(to_free,main);
+        }
+
     }
 }
 
@@ -489,7 +496,7 @@ impl UsdNearStableCoin {
         //take loan, mint USDNEAR, add to owed USDNEAR and also to total usdnear in circulation 
         acc.add_owed_usdnear_preserve_share_price(usdnear_amount.0, self);
         //balance (add/remove) locked collateral based on new owed-amount and current price
-        acc.add_locked_collateral(self);
+        acc.balance_locked_collateral(self);
         //save account
         self.internal_update_account(&env::predecessor_account_id(), &acc);
         //add corresponding newly minted USDNEAR to the user usdnear balance
@@ -512,6 +519,8 @@ impl UsdNearStableCoin {
         self.set_usdnear_balance(&env::predecessor_account_id(), usdnear_balance - to_repay);
         // repay, reduce outstanding loans usdnear, and also remove from circulation (burn the paid debt)
         acc.remove_owed_usdnear_preserve_share_price(to_repay,self);
+        //balance (add/remove) locked collateral based on new owed-amount and current price
+        acc.balance_locked_collateral(self);
         //save account
         self.internal_update_account(&env::predecessor_account_id(), &acc);
     }
