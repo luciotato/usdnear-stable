@@ -1,6 +1,6 @@
 # USDNEAR Overcollateralized Convertible Stablecoin
 
-The first NEAR Stablecoin, backed by staking, with self-paid low interest, and convertible.
+The first Stablecoin for the NEAR Ecosystem, backed by staking, with self-paid low interest, and convertible.
 
 ## Advantages
 

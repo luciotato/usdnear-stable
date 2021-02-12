@@ -162,10 +162,21 @@ impl UsdNearStableCoin {
         assert!(stnear_price_usd.0 > self.current_stnear_price* 75/100 && stnear_price_usd.0 < self.current_stnear_price * 125/100 );
         self.current_stnear_price = stnear_price_usd.0;
     }
-    
+
+    //DURING TESTING methods
     pub fn clear_busy_flag(&mut self) {
         self.assert_owner_calling();
         self.busy= false;
+    }
+    pub fn forgive_loan(&mut self, account_id:AccountId) {
+        self.assert_owner_calling();
+        let mut acc = self.internal_get_account(&account_id);
+        let owed_usdnear= self.amount_from_usdnear_shares(acc.shares_usdnear_owed);
+        acc.remove_owed_usdnear_preserve_share_price(owed_usdnear,self);
+        let locked_stnear = self.amount_from_collateral_shares(acc.locked_collateral_shares);
+        acc.remove_locked_amount_preserve_share_price(locked_stnear,self);
+        acc.add_free_amount_preserve_share_price(locked_stnear,self);
+        self.internal_update_account(&account_id,&acc);
     }
 
     /// compute rewards and interest
