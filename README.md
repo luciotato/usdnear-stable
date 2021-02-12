@@ -2,9 +2,14 @@
 
 The first Stablecoin for the NEAR Ecosystem, backed by staking, with self-paid low interest, and convertible.
 
+USDNEAR is a Stablecoin backed by Staked-NEAR as collateral. The differences with other stablecoins models are:
+1. Stability: USDNEAR price is fixed by a Conversion Window where users can convert "1 USDNEAR" into "1 USD worth of stNEAR". 
+2. Fixed low 2.5% APR: Interest is auto-paid from Staking Rewards.
+3. Liquidations have a fixed 10% fee (no auctions)
+
 ## Advantages
 
-*Trust*: We chose a simple design to make the system transparent, easy to understand, and highly reliable. The contract has a  Conversion Window where USDNEAR owners can exchange their tokens for stNEAR from the collateral pool. The rate is fixed, so "1 USDNEAR" always equals "1 USD woth of stNEAR" at the current market price. The over-collaterization rate is 200%, so there is ample funds to feed the conversion window.
+*Trust*: We choose a simple design to make the system transparent, easy to understand, and highly reliable. The contract has a Conversion Window where USDNEAR owners can exchange USDNEAR tokens for stNEAR from the collateral pool at a fixed price. To guarantee stability in the Conversion Window "1 USDNEAR" always equals "1 USD woth of stNEAR" at the current market price. The over-collaterization ratio is 200%, so there is ample funds to feed the conversion window.
 
 *Ease of use*: NEAR accounts are "named accounts" where users choose their account name, e.g.: 'alice.near'. Having readable account names, very low fees, and a stablecoin are drivers for mass adoption outside of the crypto enthusiast circle. A stablecoin with fees less than a cent and readable account names becomes useful and usable.
 
