@@ -7,6 +7,11 @@ USDNEAR is a Stablecoin backed by Staked-NEAR as collateral. The differences wit
 2. Fixed low 2.5% APR: Interest is auto-paid from Staking Rewards.
 3. Liquidations have a fixed 10% fee (no auctions)
 
+## Status: ALPHA
+
+This is an MVP project not ready for release yet. We developed USDNEAR for the 2021 ETHDenver Hackathon. It's currently in **ALPHA** stage. 
+<a href="https://discord.com/invite/tG4XJzRtdQ">Join our discord</a> to get early-access and earn token rewards on our next beta-test phase.
+
 ## Advantages
 
 *Trust*: We choose a simple design to make the system transparent, easy to understand, and highly reliable. The contract has a Conversion Window where USDNEAR owners can exchange USDNEAR tokens for stNEAR from the collateral pool at a fixed price. To guarantee stability in the Conversion Window "1 USDNEAR" always equals "1 USD woth of stNEAR" at the current market price. The over-collaterization ratio is 200%, so there is ample funds to feed the conversion window.
