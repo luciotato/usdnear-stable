@@ -9,7 +9,7 @@ USDNEAR is a Stablecoin backed by Staked-NEAR as collateral. The differences wit
 
 ## Status: ALPHA
 
-This is an MVP project not ready for release yet. We developed USDNEAR for the 2021 ETHDenver Hackathon. It's currently in **ALPHA** stage. 
+This is an MVP project not ready for release yet. We developed USDNEAR for the 2021 ETHDenver Hackathon ([see submission](https://devfolio.co/submissions/usdn-b42e)). It's currently in **ALPHA** stage. 
 <a href="https://discord.com/invite/tG4XJzRtdQ">Join our discord</a> to get early-access and earn token rewards on our next beta-test phase.
 
 ## Advantages
