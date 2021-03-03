@@ -178,9 +178,5 @@ Every hour, the contract operator computes the average NEAR/stNEAR price in USD 
 
 ###  2. compute_rewards_and_interest()
 
-Each epoch, the contract operator calls this function to compute staking rewards from all the collateral. The rewards are added to the collateral pool, increasing the stNEAR amount and then collateralization for all users.
-
-###  3. collect_interest()
-
-In the middle of each epoch, after calling compute_rewards(), the contract operator calls this function to compute interest on collateral. Interest is sent to the contract treasury.
+Each epoch, the contract operator calls this function to compute staking rewards from all the collateral. The rewards are added to the collateral pool, increasing stNEAR value and then collateralization for all users.
 
